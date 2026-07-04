@@ -1,20 +1,23 @@
 import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import { formatNumber } from "./format";
 
-/** color ramp by crit tier: white trickle -> golden blizzard -> apocalyptic */
+/** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
 const TIER_COLORS = [
-    "#9a9ab0",
-    "#e8e8f0",
+    "#8a7a52",
+    "#f5ead0",
     "#ffd75e",
-    "#ffab2e",
+    "#ffb02e",
     "#ff6b2e",
-    "#ff2e5e",
-    "#c92eff",
-    "#4ec9ff",
+    "#ff2e46",
+    "#ff3bd0",
+    "#00e5ff",
     "#ffffff",
 ];
 
 const GOLDEN_COLOR = "#ffe066";
+
+/** heavy payout-counter face for the erupting numbers */
+const CRIT_FONT = "'Arial Black', 'Franklin Gothic Bold', Impact, sans-serif";
 
 interface FloatingCrit {
     text: Text;
@@ -61,7 +64,7 @@ export class CritEngine {
         for (let i = 0; i < POOL_SIZE; i++) {
             const t = new Text({
                 text: "",
-                style: new TextStyle({ fontFamily: "monospace", fontWeight: "bold" }),
+                style: new TextStyle({ fontFamily: CRIT_FONT, fontWeight: "bold" }),
             });
             t.visible = false;
             t.anchor.set(0.5);
@@ -73,7 +76,7 @@ export class CritEngine {
 
     static async create(host: HTMLElement): Promise<CritEngine> {
         const app = new Application();
-        await app.init({ background: "#0a0a12", resizeTo: host, antialias: true });
+        await app.init({ background: "#080605", resizeTo: host, antialias: true });
         host.appendChild(app.canvas);
         return new CritEngine(app);
     }
@@ -116,7 +119,7 @@ export class CritEngine {
         const token = new Text({
             text: "7 7 7",
             style: new TextStyle({
-                fontFamily: "monospace",
+                fontFamily: CRIT_FONT,
                 fontWeight: "bold",
                 fontSize: 34,
                 fill: GOLDEN_COLOR,

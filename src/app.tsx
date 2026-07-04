@@ -238,16 +238,39 @@ export function App() {
                         {muted ? "unmute" : "mute"}
                     </button>
                 </div>
-                <div className="stat-big">{formatNumber(hud.essence)} essence</div>
-                <div className="stat">{formatNumber(hud.dps)} dps expected</div>
-                <div className="stat">
-                    {(hud.critChance * 100).toFixed(1)}% crit · ×{hud.critMulti.toFixed(1)} ·{" "}
-                    {hud.attacksPerSec.toFixed(2)}/s
-                    {hud.goldenChance > 0 && ` · ✦${(hud.goldenChance * 100).toFixed(1)}%`}
+                <div className="payout">
+                    <span className="payout-value">{formatNumber(hud.essence)}</span>
+                    <span className="payout-label">essence</span>
+                </div>
+                <div className="dps">
+                    <span className="stat-val">{formatNumber(hud.dps)}</span>
+                    <span className="stat-key">dps expected</span>
+                </div>
+                <div className="statgrid">
+                    <div className="chip">
+                        <span className="chip-k">crit</span>
+                        <span className="chip-v">{(hud.critChance * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="chip">
+                        <span className="chip-k">mult</span>
+                        <span className="chip-v">×{hud.critMulti.toFixed(1)}</span>
+                    </div>
+                    <div className="chip">
+                        <span className="chip-k">rate</span>
+                        <span className="chip-v">{hud.attacksPerSec.toFixed(2)}/s</span>
+                    </div>
+                    {hud.goldenChance > 0 && (
+                        <div className="chip gold">
+                            <span className="chip-k">gold</span>
+                            <span className="chip-v">✦{(hud.goldenChance * 100).toFixed(1)}%</span>
+                        </div>
+                    )}
                 </div>
                 {inFrenzy ? (
                     <div className="frenzy-banner">
-                        FRENZY ×{FRENZY_MULTI} — {hud.frenzySeconds.toFixed(1)}s
+                        <span className="frenzy-word">FRENZY</span>
+                        <span className="frenzy-x">×{FRENZY_MULTI}</span>
+                        <span className="frenzy-time">{hud.frenzySeconds.toFixed(1)}s</span>
                     </div>
                 ) : (
                     <div className="heat">

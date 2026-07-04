@@ -1,3 +1,37 @@
+/* critstorm — premium slot-cabinet skin.
+   single locked dark theme by design: a casino machine is never light-mode.
+   accent lock: gold = trim + money everywhere, red = heat / frenzy danger. */
+
+:root {
+  --cabinet: #0d0b08;
+  --cabinet-raised: #17130c;
+  --cabinet-seam: #050403;
+  --felt: #0a1f16;
+  --felt-hi: #12352600;
+
+  --gold: #f4cf5a;
+  --gold-hi: #fff2c2;
+  --gold-deep: #a97d24;
+  --gold-shadow: #6f4f14;
+  --grad-gold: linear-gradient(180deg, #fff2c2 0%, #f4cf5a 42%, #cf9f34 72%, #8f6a1e 100%);
+  --grad-gold-v: linear-gradient(90deg, #fff2c2 0%, #f4cf5a 42%, #cf9f34 72%, #8f6a1e 100%);
+
+  --red: #ff2e46;
+  --red-hot: #ff5a70;
+  --red-deep: #7a0f1f;
+
+  --ink: #efe6cf;
+  --ink-dim: #b6a374;
+  --ink-faint: #7c6c47;
+
+  --bulb-lit: #ffe89a;
+  --bulb-dim: #59421a;
+
+  --font-cabinet: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-display: 'Arial Black', 'Arial Narrow Bold', Impact, 'Franklin Gothic Bold', sans-serif;
+  --font-num: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Consolas', 'Menlo', monospace;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -8,9 +42,9 @@ html,
 body,
 #root {
   height: 100%;
-  background: #0a0a12;
-  color: #e8e8f0;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--cabinet);
+  color: var(--ink);
+  font-family: var(--font-cabinet);
   overflow: hidden;
 }
 
@@ -19,198 +53,500 @@ body,
   height: 100%;
 }
 
+/* ─── the machine screen ─────────────────────────────────────────────── */
+
 .stage {
+  position: relative;
   flex: 1;
   cursor: crosshair;
+  overflow: hidden;
 }
 
-.stage.frenzy {
-  box-shadow: inset 0 0 60px rgba(255, 107, 46, 0.55);
-  animation: frenzy-glow 0.6s ease-in-out infinite alternate;
+/* permanent cabinet-screen framing: dark vignette + a thin gold bezel line.
+   frames the crit blizzard without competing with it. */
+.stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 8px 1px rgba(0, 0, 0, 0.9),
+    inset 0 0 0 2px rgba(244, 207, 90, 0.14),
+    inset 0 0 120px 20px rgba(0, 0, 0, 0.55);
+}
+
+/* frenzy glow overlay — sits ABOVE the pixi canvas so it actually shows
+   (the old inset shadow on .stage was painted over by the canvas child). */
+.stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    inset 0 0 70px 6px rgba(255, 46, 70, 0.55),
+    inset 0 0 22px 2px rgba(255, 140, 60, 0.6),
+    inset 0 0 0 3px rgba(255, 90, 112, 0.7);
+}
+
+.stage.frenzy::after {
+  opacity: 1;
+  animation: frenzy-glow 0.55s ease-in-out infinite alternate;
 }
 
 @keyframes frenzy-glow {
   from {
-    box-shadow: inset 0 0 40px rgba(255, 107, 46, 0.4);
+    box-shadow:
+      inset 0 0 46px 4px rgba(255, 120, 46, 0.45),
+      inset 0 0 0 3px rgba(255, 176, 46, 0.55);
   }
   to {
-    box-shadow: inset 0 0 90px rgba(255, 46, 94, 0.65);
+    box-shadow:
+      inset 0 0 110px 12px rgba(255, 46, 94, 0.7),
+      inset 0 0 0 4px rgba(255, 90, 112, 0.9);
   }
 }
 
+/* ─── the cabinet side panel (HUD) ───────────────────────────────────── */
+
 .hud {
-  width: 280px;
-  padding: 20px;
-  background: #11111c;
-  border-left: 1px solid #26263a;
+  position: relative;
+  width: 300px;
+  flex: none;
+  padding: 22px 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 11px;
+  background:
+    radial-gradient(120% 80% at 80% -10%, rgba(244, 207, 90, 0.06), transparent 60%),
+    linear-gradient(180deg, var(--cabinet-raised), var(--cabinet) 60%);
+  border-left: 2px solid var(--gold-shadow);
+  box-shadow: inset 12px 0 24px -14px rgba(0, 0, 0, 0.9);
 }
 
-.hud h1 {
-  font-size: 18px;
-  letter-spacing: 3px;
-  color: #ffd75e;
-  text-transform: uppercase;
+/* the lit gold seam where the cabinet meets the screen: a bulb strip that
+   chases downward like a marquee edge. */
+.hud::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background:
+    var(--grad-gold-v),
+    radial-gradient(circle at 3px 9px, var(--bulb-lit) 1.8px, transparent 2.4px);
+  background-size: 100% 100%, 100% 22px;
+  background-repeat: no-repeat, repeat-y;
+  box-shadow: 0 0 8px rgba(255, 224, 130, 0.5);
 }
+
+.hud::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  pointer-events: none;
+  background: radial-gradient(circle at 3px 9px, rgba(255, 245, 210, 0.95) 2.4px, transparent 3px);
+  background-size: 100% 22px;
+  opacity: 0.9;
+  animation: bulb-chase 1.6s linear infinite;
+}
+
+@keyframes bulb-chase {
+  from { background-position: 0 -22px; opacity: 0.25; }
+  50%  { opacity: 0.95; }
+  to   { background-position: 0 22px; opacity: 0.25; }
+}
+
+/* ─── title marquee ──────────────────────────────────────────────────── */
 
 .title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.hud h1 {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: 27px;
+  line-height: 1;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold-hi);
+  /* neon-tube glow (brief calls for neon-sign energy) */
+  text-shadow:
+    0 0 1px #fff,
+    0 0 6px rgba(255, 224, 130, 0.9),
+    0 0 14px rgba(244, 207, 90, 0.7),
+    0 0 26px rgba(255, 120, 46, 0.5),
+    0 2px 0 #7a5514;
+  animation: neon-flicker 4.5s steps(1) infinite;
+}
+
+.hud h1::before,
+.hud h1::after {
+  content: '\2726';
+  font-size: 13px;
+  color: var(--red-hot);
+  vertical-align: 4px;
+  text-shadow: 0 0 8px rgba(255, 46, 70, 0.9);
+  margin: 0 4px;
+}
+
+@keyframes neon-flicker {
+  0%, 92%, 100% { opacity: 1; }
+  93% { opacity: 0.55; }
+  94% { opacity: 1; }
+  96% { opacity: 0.7; }
+  97% { opacity: 1; }
 }
 
 .mute {
-  background: none;
-  border: 1px solid #33334d;
-  border-radius: 4px;
-  color: #9a9ab0;
-  font-size: 11px;
-  padding: 3px 8px;
+  font-family: var(--font-num);
+  background: linear-gradient(180deg, #241d12, #140f09);
+  border: 1px solid var(--gold-shadow);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 4px 10px;
   cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
 .mute:hover {
-  border-color: #ffd75e;
-  color: #e8e8f0;
+  border-color: var(--gold);
+  color: var(--gold-hi);
+  box-shadow: 0 0 10px rgba(244, 207, 90, 0.3);
 }
+
+.mute:active {
+  transform: translateY(1px);
+}
+
+/* ─── payout window (essence) ────────────────────────────────────────── */
+
+.payout {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 14px 12px 9px;
+  border-radius: 8px;
+  background:
+    radial-gradient(120% 140% at 50% 0%, rgba(28, 74, 54, 0.4), transparent 70%),
+    linear-gradient(180deg, #071711, var(--felt));
+  border: 2px solid transparent;
+  border-image: var(--grad-gold) 1;
+  box-shadow:
+    inset 0 3px 14px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 1px rgba(255, 224, 130, 0.12),
+    0 1px 0 rgba(255, 242, 194, 0.15);
+}
+
+.payout-value {
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-hi);
+  text-shadow:
+    0 0 5px rgba(255, 224, 130, 0.7),
+    0 0 16px rgba(244, 207, 90, 0.45),
+    0 2px 1px rgba(0, 0, 0, 0.8);
+}
+
+.payout-label {
+  font-size: 10px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* ─── dps + stat chips ───────────────────────────────────────────────── */
+
+.dps {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 7px;
+  font-family: var(--font-num);
+  margin-top: -1px;
+}
+
+.dps .stat-val {
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.dps .stat-key {
+  color: var(--ink-faint);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.statgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+  gap: 6px;
+}
+
+.chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #211a10, #100c07);
+  border: 1px solid #3a2e18;
+  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.06);
+}
+
+.chip-k {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.chip-v {
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.chip.gold {
+  border-color: var(--gold-shadow);
+  background: linear-gradient(180deg, #2a2110, #140d05);
+}
+
+.chip.gold .chip-v {
+  color: var(--gold);
+  text-shadow: 0 0 8px rgba(244, 207, 90, 0.4);
+}
+
+/* ─── heat gauge ─────────────────────────────────────────────────────── */
 
 .heat {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
+  gap: 5px;
+  margin-top: 2px;
 }
 
 .heat-label {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
-  color: #9a9ab0;
+  align-items: baseline;
+  font-family: var(--font-num);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.heat-label > span:first-child {
+  font-weight: 700;
+  color: var(--red-hot);
+  font-variant-numeric: tabular-nums;
 }
 
 .heat-hint {
-  color: #55556d;
-  font-size: 11px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
-.heat-bar {
-  height: 6px;
-  background: #1a1a2a;
-  border: 1px solid #33334d;
-  border-radius: 3px;
+.heat-bar,
+.rank-bar {
+  position: relative;
+  height: 12px;
+  border-radius: 7px;
+  background: #0a0704;
+  border: 1px solid #3a2e18;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.9);
   overflow: hidden;
+}
+
+/* segmented gauge ticks laid over the fill so it reads as a meter */
+.heat-bar::after,
+.rank-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 13px,
+    rgba(0, 0, 0, 0.55) 13px,
+    rgba(0, 0, 0, 0.55) 15px
+  );
 }
 
 .heat-fill {
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, #ff6b2e, #ff2e5e);
   transform-origin: left;
   transition: transform 0.1s linear;
-}
-
-.frenzy-banner {
-  margin-top: 4px;
-  padding: 8px 10px;
-  border: 1px solid #ff6b2e;
-  border-radius: 6px;
-  background: rgba(255, 107, 46, 0.12);
-  color: #ff6b2e;
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 1px;
-  text-align: center;
-  animation: frenzy-banner-pulse 0.4s ease-in-out infinite alternate;
-}
-
-@keyframes frenzy-banner-pulse {
-  from {
-    opacity: 0.75;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.rank {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.rank-label {
-  font-size: 13px;
-  color: #9a9ab0;
-}
-
-.rank-label strong {
-  color: #ffd75e;
-  letter-spacing: 1px;
-}
-
-.rank-next {
-  color: #55556d;
-}
-
-.rank-bar {
-  height: 6px;
-  background: #1a1a2a;
-  border: 1px solid #33334d;
-  border-radius: 3px;
-  overflow: hidden;
+  background: linear-gradient(90deg, #ff8a2e, var(--red) 70%, var(--red-hot));
+  box-shadow: 0 0 12px rgba(255, 46, 70, 0.6);
 }
 
 .rank-fill {
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, #ffd75e, #ffab2e);
   transform-origin: left;
   transition: transform 0.2s;
+  background: linear-gradient(90deg, #cf9f34, var(--gold) 60%, var(--gold-hi));
+  box-shadow: 0 0 12px rgba(244, 207, 90, 0.5);
 }
 
-.stat-big {
-  font-size: 24px;
+/* ─── frenzy marquee sign ────────────────────────────────────────────── */
+
+.frenzy-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 2px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 46, 70, 0.16) 0 10px, rgba(255, 138, 46, 0.16) 10px 20px);
+  border: 2px solid var(--red);
+  box-shadow:
+    0 0 16px rgba(255, 46, 70, 0.5),
+    inset 0 0 10px rgba(255, 138, 46, 0.35);
+  animation: frenzy-sign 0.45s ease-in-out infinite alternate;
+}
+
+.frenzy-word {
+  font-family: var(--font-display);
+  font-size: 17px;
+  letter-spacing: 2px;
+  color: #fff;
+  text-shadow: 0 0 8px rgba(255, 46, 70, 0.95), 0 0 16px rgba(255, 138, 46, 0.7);
+}
+
+.frenzy-x {
+  font-family: var(--font-num);
   font-weight: 700;
+  font-size: 16px;
+  color: var(--gold-hi);
+  text-shadow: 0 0 8px rgba(244, 207, 90, 0.7);
 }
 
-.stat {
-  font-size: 13px;
-  color: #9a9ab0;
+.frenzy-time {
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: #fff;
 }
+
+@keyframes frenzy-sign {
+  from { box-shadow: 0 0 10px rgba(255, 46, 70, 0.4), inset 0 0 8px rgba(255, 138, 46, 0.25); }
+  to   { box-shadow: 0 0 24px rgba(255, 46, 70, 0.75), inset 0 0 14px rgba(255, 138, 46, 0.5); }
+}
+
+/* ─── rank ───────────────────────────────────────────────────────────── */
+
+.rank {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.rank-label {
+  font-family: var(--font-num);
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.rank-label strong {
+  color: var(--gold);
+  letter-spacing: 2px;
+  text-shadow: 0 0 8px rgba(244, 207, 90, 0.4);
+}
+
+.rank-next {
+  color: var(--ink-faint);
+  text-transform: none;
+}
+
+/* ─── upgrade buttons (cabinet betting chips) ────────────────────────── */
 
 .upgrades {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .upgrades button {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  background: #1a1a2a;
-  border: 1px solid #33334d;
-  border-radius: 6px;
-  color: #e8e8f0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'name cost'
+    'desc cost';
+  align-items: center;
+  column-gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid #4a3a1c;
+  border-radius: 9px;
+  color: var(--ink);
   text-align: left;
   cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  transition: border-color 0.15s;
+  font-family: var(--font-cabinet);
+  background:
+    linear-gradient(180deg, rgba(255, 242, 194, 0.06), transparent 40%),
+    linear-gradient(180deg, #241c10, #130d06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 242, 194, 0.12),
+    0 2px 0 #050302,
+    0 3px 6px rgba(0, 0, 0, 0.6);
+  transition: transform 0.08s, border-color 0.15s, box-shadow 0.15s, filter 0.15s;
 }
 
 .upgrades button:hover:not(:disabled) {
-  border-color: #ffd75e;
+  border-color: var(--gold);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 242, 194, 0.2),
+    0 2px 0 #050302,
+    0 0 14px rgba(244, 207, 90, 0.35);
+}
+
+.upgrades button:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.6),
+    0 0 10px rgba(244, 207, 90, 0.3);
 }
 
 .upgrades button:disabled {
-  opacity: 0.45;
   cursor: default;
+  filter: grayscale(0.6) brightness(0.62);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55);
 }
 
 .upgrades button.bought {
@@ -220,42 +556,84 @@ body,
 @keyframes bought-pulse {
   0% {
     transform: scale(1);
-    border-color: #ffd75e;
-    box-shadow: 0 0 0 rgba(255, 215, 94, 0.8);
+    border-color: var(--gold-hi);
+    box-shadow: 0 0 0 rgba(255, 224, 130, 0);
   }
-  30% {
-    transform: scale(1.05);
-    box-shadow: 0 0 18px rgba(255, 215, 94, 0.5);
+  35% {
+    transform: scale(1.04);
+    border-color: var(--gold-hi);
+    box-shadow: 0 0 22px rgba(255, 224, 130, 0.7);
   }
   100% {
     transform: scale(1);
-    border-color: #33334d;
-    box-shadow: 0 0 0 rgba(255, 215, 94, 0);
+    border-color: #4a3a1c;
+    box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.12), 0 2px 0 #050302;
   }
 }
 
 .upgrade-name {
-  font-weight: 600;
+  grid-area: name;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+  letter-spacing: 0.3px;
 }
 
 .upgrade-name em {
   font-style: normal;
-  color: #9a9ab0;
+  color: var(--ink-faint);
   font-weight: 400;
+  font-family: var(--font-num);
+  font-size: 11px;
 }
 
 .upgrade-desc {
-  color: #9a9ab0;
-  font-size: 12px;
+  grid-area: desc;
+  color: var(--ink-dim);
+  font-size: 11px;
 }
 
+/* the price reads as a stamped gold chip */
 .upgrade-cost {
-  color: #ffd75e;
+  grid-area: cost;
+  align-self: center;
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
+  color: #2a1d05;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--grad-gold);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(0, 0, 0, 0.5);
 }
+
+button:disabled .upgrade-cost {
+  background: linear-gradient(180deg, #4a4230, #2c2618);
+  color: #8f815e;
+  box-shadow: none;
+}
+
+/* ─── hint ───────────────────────────────────────────────────────────── */
 
 .hint {
   margin-top: auto;
-  font-size: 12px;
-  color: #55556d;
+  padding-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+/* ─── reduced motion ─────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .stage.frenzy::after,
+  .hud h1,
+  .hud::after,
+  .frenzy-banner {
+    animation: none !important;
+  }
+  .hud::after { opacity: 0.7; }
+  .stage.frenzy::after { opacity: 1; }
 }
