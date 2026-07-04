@@ -1,0 +1,110 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: #0a0a12;
+  color: #e8e8f0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.layout {
+  display: flex;
+  height: 100%;
+}
+
+.stage {
+  flex: 1;
+  cursor: crosshair;
+}
+
+.hud {
+  width: 280px;
+  padding: 20px;
+  background: #11111c;
+  border-left: 1px solid #26263a;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hud h1 {
+  font-size: 18px;
+  letter-spacing: 3px;
+  color: #ffd75e;
+  text-transform: uppercase;
+}
+
+.stat-big {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.stat {
+  font-size: 13px;
+  color: #9a9ab0;
+}
+
+.upgrades {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.upgrades button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: #1a1a2a;
+  border: 1px solid #33334d;
+  border-radius: 6px;
+  color: #e8e8f0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+
+.upgrades button:hover:not(:disabled) {
+  border-color: #ffd75e;
+}
+
+.upgrades button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.upgrade-name {
+  font-weight: 600;
+}
+
+.upgrade-name em {
+  font-style: normal;
+  color: #9a9ab0;
+  font-weight: 400;
+}
+
+.upgrade-desc {
+  color: #9a9ab0;
+  font-size: 12px;
+}
+
+.upgrade-cost {
+  color: #ffd75e;
+  font-size: 12px;
+}
+
+.hint {
+  margin-top: auto;
+  font-size: 12px;
+  color: #55556d;
+}

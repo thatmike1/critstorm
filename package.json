@@ -1,0 +1,26 @@
+{
+    "name": "critstorm",
+    "private": true,
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc --noEmit && vite build",
+        "preview": "vite preview",
+        "sim": "tsx sim/run-sim.ts"
+    },
+    "dependencies": {
+        "pixi.js": "^8.6.6",
+        "react": "^19.1.0",
+        "react-dom": "^19.1.0"
+    },
+    "devDependencies": {
+        "@types/node": "^26.1.0",
+        "@types/react": "^19.1.0",
+        "@types/react-dom": "^19.1.0",
+        "@vitejs/plugin-react": "^4.4.1",
+        "tsx": "^4.19.3",
+        "typescript": "^5.8.3",
+        "vite": "^6.3.5"
+    }
+}
