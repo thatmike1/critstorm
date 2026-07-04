@@ -55,4 +55,15 @@ export class AudioEngine {
         this.blip(196, 0.08, "square", 0.07);
         this.blip(392, 0.15, "triangle", 0.09, 0.06);
     }
+
+    /** frenzy ignition: rising four-note sweep */
+    frenzy(): void {
+        [330, 440, 587, 784].forEach((f, i) => this.blip(f, 0.14, "sawtooth", 0.07, i * 0.07));
+    }
+
+    /** jackpot catch: big slot-machine payout arpeggio */
+    jackpot(): void {
+        [523, 659, 784, 1047, 1319].forEach((f, i) => this.blip(f, 0.2, "triangle", 0.1, i * 0.06));
+        this.blip(262, 0.5, "square", 0.05, 0.1);
+    }
 }

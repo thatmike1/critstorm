@@ -27,6 +27,13 @@ interface FloatingCrit {
     spin: number;
 }
 
+interface FallingBonus {
+    text: Text;
+    vy: number;
+    swayPhase: number;
+    elapsed: number;
+}
+
 const POOL_SIZE = 600;
 
 /**
@@ -40,6 +47,7 @@ export class CritEngine {
     private flashAlpha = 0;
     private pool: Text[] = [];
     private active: FloatingCrit[] = [];
+    private bonuses: FallingBonus[] = [];
     private shakeTime = 0;
     private shakeStrength = 0;
 
@@ -97,6 +105,49 @@ export class CritEngine {
         if (tier >= 4) this.shake(Math.min(2 + (tier - 4) * 3, 14));
         if (tier >= 6 || golden)
             this.flashScreen(golden ? 0xffe066 : 0xff2e5e, golden ? 0.12 : 0.2);
+    }
+
+    /**
+     * drop a clickable jackpot token that falls through the play area;
+     * onCatch fires if the player clicks it before it leaves the screen
+     */
+    spawnBonus(onCatch: () => void): void {
+        const w = this.app.screen.width;
+        const token = new Text({
+            text: "7 7 7",
+            style: new TextStyle({
+                fontFamily: "monospace",
+                fontWeight: "bold",
+                fontSize: 34,
+                fill: GOLDEN_COLOR,
+                stroke: { color: "#1a0a00", width: 5 },
+            }),
+        });
+        token.anchor.set(0.5);
+        token.position.set(w * 0.15 + Math.random() * w * 0.7, -40);
+        token.eventMode = "static";
+        token.cursor = "pointer";
+        const bonus: FallingBonus = {
+            text: token,
+            vy: 55 + Math.random() * 25,
+            swayPhase: Math.random() * Math.PI * 2,
+            elapsed: 0,
+        };
+        token.on("pointerdown", () => {
+            this.removeBonus(bonus);
+            this.flashScreen(0xffe066, 0.25);
+            this.shake(8);
+            onCatch();
+        });
+        this.stage.addChild(token);
+        this.bonuses.push(bonus);
+    }
+
+    private removeBonus(bonus: FallingBonus): void {
+        const idx = this.bonuses.indexOf(bonus);
+        if (idx === -1) return;
+        this.bonuses.splice(idx, 1);
+        bonus.text.destroy();
     }
 
     /** celebratory burst when an upgrade is bought: plus-signs erupt near the HUD edge */
@@ -202,6 +253,16 @@ export class CritEngine {
                 this.pool.push(c.text);
                 this.active.splice(i, 1);
             }
+        }
+        for (let i = this.bonuses.length - 1; i >= 0; i--) {
+            const b = this.bonuses[i];
+            b.elapsed += dt;
+            b.text.y += b.vy * dt;
+            b.text.x += Math.sin(b.elapsed * 2 + b.swayPhase) * 30 * dt;
+            b.text.rotation = Math.sin(b.elapsed * 3 + b.swayPhase) * 0.2;
+            // gentle pulse so it reads as "click me"
+            b.text.scale.set(1 + Math.sin(b.elapsed * 5) * 0.12);
+            if (b.text.y > this.app.screen.height + 50) this.removeBonus(b);
         }
         if (this.flashAlpha > 0) {
             this.flashAlpha = Math.max(0, this.flashAlpha - dt * 0.8);

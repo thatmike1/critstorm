@@ -24,6 +24,20 @@ body,
   cursor: crosshair;
 }
 
+.stage.frenzy {
+  box-shadow: inset 0 0 60px rgba(255, 107, 46, 0.55);
+  animation: frenzy-glow 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes frenzy-glow {
+  from {
+    box-shadow: inset 0 0 40px rgba(255, 107, 46, 0.4);
+  }
+  to {
+    box-shadow: inset 0 0 90px rgba(255, 46, 94, 0.65);
+  }
+}
+
 .hud {
   width: 280px;
   padding: 20px;
@@ -60,6 +74,64 @@ body,
 .mute:hover {
   border-color: #ffd75e;
   color: #e8e8f0;
+}
+
+.heat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.heat-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #9a9ab0;
+}
+
+.heat-hint {
+  color: #55556d;
+  font-size: 11px;
+}
+
+.heat-bar {
+  height: 6px;
+  background: #1a1a2a;
+  border: 1px solid #33334d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.heat-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ff6b2e, #ff2e5e);
+  transform-origin: left;
+  transition: transform 0.1s linear;
+}
+
+.frenzy-banner {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid #ff6b2e;
+  border-radius: 6px;
+  background: rgba(255, 107, 46, 0.12);
+  color: #ff6b2e;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-align: center;
+  animation: frenzy-banner-pulse 0.4s ease-in-out infinite alternate;
+}
+
+@keyframes frenzy-banner-pulse {
+  from {
+    opacity: 0.75;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .rank {

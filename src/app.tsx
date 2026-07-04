@@ -14,13 +14,29 @@ import {
     critMulti,
     attacksPerSec,
     goldenChance,
+    frenzyActive,
+    startFrenzy,
     rankInfo,
+    FRENZY_MULTI,
     UPGRADES,
     type EconomyState,
     type RankInfo,
     type UpgradeId,
 } from "./game/economy";
 import { formatNumber } from "./game/format";
+
+/** clicking heat: each manual click adds this much (0-100 scale) */
+const HEAT_PER_CLICK = 7;
+
+/** heat decay per second — stop clicking and the meter drains */
+const HEAT_DECAY = 16;
+
+/** rolling window for the clicks-per-second readout */
+const CPS_WINDOW = 2;
+
+/** jackpot token cadence: next drop lands uniformly in this range (seconds) */
+const BONUS_MIN_GAP = 30;
+const BONUS_MAX_GAP = 90;
 
 /** snapshot of economy values the HUD renders each frame */
 interface HudState {
@@ -31,6 +47,7 @@ interface HudState {
     attacksPerSec: number;
     goldenChance: number;
     rank: RankInfo;
+    frenzySeconds: number;
     levels: Record<UpgradeId, number>;
     costs: Record<UpgradeId, number>;
     affordable: Record<UpgradeId, boolean>;
@@ -51,13 +68,17 @@ function snapshot(s: EconomyState): HudState {
         attacksPerSec: attacksPerSec(s),
         goldenChance: goldenChance(s),
         rank: rankInfo(s),
+        frenzySeconds: s.frenzyTimer,
         levels: { ...s.levels },
         costs,
         affordable,
     };
 }
 
-/** dev cheat: ?lv=base,chance,multi,rate,golden jumps to a late-game state for spectacle testing */
+/**
+ * dev cheats: ?lv=base,chance,multi,rate,golden jumps to a late-game state,
+ * ?bonusin=SECONDS forces the first jackpot token drop
+ */
 function createInitialState(): EconomyState {
     const s = createState();
     const lv = new URLSearchParams(window.location.search).get("lv");
@@ -74,13 +95,24 @@ function createInitialState(): EconomyState {
     return s;
 }
 
+function firstBonusDelay(): number {
+    const forced = new URLSearchParams(window.location.search).get("bonusin");
+    if (forced) return Number(forced);
+    return BONUS_MIN_GAP + Math.random() * (BONUS_MAX_GAP - BONUS_MIN_GAP);
+}
+
 export function App() {
     const hostRef = useRef<HTMLDivElement>(null);
     const stateRef = useRef<EconomyState>(createInitialState());
     const engineRef = useRef<CritEngine | null>(null);
     const audioRef = useRef<AudioEngine>(new AudioEngine());
+    const clickTimesRef = useRef<number[]>([]);
+    const heatRef = useRef(0);
+    const nextBonusRef = useRef(firstBonusDelay());
     const [hud, setHud] = useState<HudState>(() => snapshot(stateRef.current));
     const [muted, setMuted] = useState(false);
+    const [cps, setCps] = useState(0);
+    const [heat, setHeat] = useState(0);
     const [pulsing, setPulsing] = useState<Partial<Record<UpgradeId, boolean>>>({});
 
     useEffect(() => {
@@ -89,6 +121,26 @@ export function App() {
         let last = performance.now();
         let hudTimer = 0;
         let cancelled = false;
+
+        const catchBonus = () => {
+            const s = stateRef.current;
+            audioRef.current.jackpot();
+            // jackpot: half the time a fat payout, half the time instant frenzy
+            if (Math.random() < 0.5 && !frenzyActive(s)) {
+                startFrenzy(s);
+                audioRef.current.frenzy();
+            } else {
+                const payout = Math.max(expectedDps(s) * 30, 100);
+                s.essence += payout;
+                s.totalDamage += payout;
+                engine?.spawn(payout, 5, true);
+            }
+        };
+
+        const scheduleBonus = (elapsed: number) => {
+            nextBonusRef.current =
+                elapsed + BONUS_MIN_GAP + Math.random() * (BONUS_MAX_GAP - BONUS_MIN_GAP);
+        };
 
         CritEngine.create(hostRef.current!).then((e) => {
             if (cancelled) {
@@ -100,16 +152,27 @@ export function App() {
             const frame = (now: number) => {
                 const dt = Math.min((now - last) / 1000, 0.1);
                 last = now;
-                const results = tick(stateRef.current, dt, Math.random);
+                const s = stateRef.current;
+                const results = tick(s, dt, Math.random);
                 for (const r of results) {
                     engine!.spawn(r.damage, r.tier, r.golden);
                     audioRef.current.attack(r.tier);
                     if (r.golden) audioRef.current.golden();
                 }
+                // heat drains constantly; frenzy triggers when the meter fills
+                heatRef.current = Math.max(0, heatRef.current - HEAT_DECAY * dt);
+                if (s.elapsed >= nextBonusRef.current) {
+                    engine!.spawnBonus(catchBonus);
+                    scheduleBonus(s.elapsed);
+                }
                 hudTimer += dt;
                 if (hudTimer >= 0.1) {
                     hudTimer = 0;
-                    setHud(snapshot(stateRef.current));
+                    const cutoff = performance.now() - CPS_WINDOW * 1000;
+                    clickTimesRef.current = clickTimesRef.current.filter((t) => t > cutoff);
+                    setCps(clickTimesRef.current.length / CPS_WINDOW);
+                    setHeat(heatRef.current);
+                    setHud(snapshot(s));
                 }
                 raf = requestAnimationFrame(frame);
             };
@@ -126,8 +189,18 @@ export function App() {
 
     const manualAttack = () => {
         audioRef.current.unlock();
-        const r = rollAttack(stateRef.current, Math.random);
-        applyAttack(stateRef.current, r);
+        const s = stateRef.current;
+        clickTimesRef.current.push(performance.now());
+        if (!frenzyActive(s)) {
+            heatRef.current += HEAT_PER_CLICK;
+            if (heatRef.current >= 100) {
+                heatRef.current = 0;
+                startFrenzy(s);
+                audioRef.current.frenzy();
+            }
+        }
+        const r = rollAttack(s, Math.random);
+        applyAttack(s, r);
         engineRef.current?.spawn(r.damage, r.tier, r.golden);
         audioRef.current.attack(Math.max(r.tier, 1));
         if (r.golden) audioRef.current.golden();
@@ -149,9 +222,15 @@ export function App() {
         setMuted(audioRef.current.muted);
     };
 
+    const inFrenzy = hud.frenzySeconds > 0;
+
     return (
         <div className="layout">
-            <div ref={hostRef} className="stage" onPointerDown={manualAttack} />
+            <div
+                ref={hostRef}
+                className={inFrenzy ? "stage frenzy" : "stage"}
+                onPointerDown={manualAttack}
+            />
             <aside className="hud">
                 <div className="title-row">
                     <h1>critstorm</h1>
@@ -166,6 +245,24 @@ export function App() {
                     {hud.attacksPerSec.toFixed(2)}/s
                     {hud.goldenChance > 0 && ` · ✦${(hud.goldenChance * 100).toFixed(1)}%`}
                 </div>
+                {inFrenzy ? (
+                    <div className="frenzy-banner">
+                        FRENZY ×{FRENZY_MULTI} — {hud.frenzySeconds.toFixed(1)}s
+                    </div>
+                ) : (
+                    <div className="heat">
+                        <div className="heat-label">
+                            <span>{cps.toFixed(1)} clicks/s</span>
+                            <span className="heat-hint">click fast → frenzy</span>
+                        </div>
+                        <div className="heat-bar">
+                            <div
+                                className="heat-fill"
+                                style={{ transform: `scaleX(${(heat / 100).toFixed(3)})` }}
+                            />
+                        </div>
+                    </div>
+                )}
                 <div className="rank">
                     <div className="rank-label">
                         rank: <strong>{hud.rank.name}</strong>
@@ -194,7 +291,7 @@ export function App() {
                         </button>
                     ))}
                 </div>
-                <p className="hint">click anywhere to attack manually</p>
+                <p className="hint">click anywhere to attack manually · catch falling 7 7 7</p>
             </aside>
         </div>
     );
