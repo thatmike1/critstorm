@@ -1,4 +1,4 @@
-import { Application, Container, Text, TextStyle } from "pixi.js";
+import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import { formatNumber } from "./format";
 
 /** color ramp by crit tier: white trickle -> golden blizzard -> apocalyptic */
@@ -14,6 +14,8 @@ const TIER_COLORS = [
     "#ffffff",
 ];
 
+const GOLDEN_COLOR = "#ffe066";
+
 interface FloatingCrit {
     text: Text;
     vx: number;
@@ -22,6 +24,7 @@ interface FloatingCrit {
     maxLife: number;
     tier: number;
     baseScale: number;
+    spin: number;
 }
 
 const POOL_SIZE = 600;
@@ -33,6 +36,8 @@ const POOL_SIZE = 600;
 export class CritEngine {
     private app: Application;
     private stage: Container;
+    private flash: Graphics;
+    private flashAlpha = 0;
     private pool: Text[] = [];
     private active: FloatingCrit[] = [];
     private shakeTime = 0;
@@ -42,6 +47,9 @@ export class CritEngine {
         this.app = app;
         this.stage = new Container();
         app.stage.addChild(this.stage);
+        this.flash = new Graphics();
+        this.flash.visible = false;
+        app.stage.addChild(this.flash);
         for (let i = 0; i < POOL_SIZE; i++) {
             const t = new Text({
                 text: "",
@@ -62,7 +70,75 @@ export class CritEngine {
         return new CritEngine(app);
     }
 
-    spawn(damage: number, tier: number): void {
+    spawn(damage: number, tier: number, golden = false): void {
+        const w = this.app.screen.width;
+        const h = this.app.screen.height;
+        const fontSize =
+            13 + tier * 9 + Math.min(Math.log10(damage + 1) * 2, 24) + (golden ? 10 : 0);
+        const label = golden ? `✦ ${formatNumber(damage)} ✦` : formatNumber(damage);
+        const fill = golden ? GOLDEN_COLOR : TIER_COLORS[Math.min(tier, TIER_COLORS.length - 1)];
+        const strokeWidth = golden ? 4 : tier >= 2 ? Math.min(tier, 4) : 0;
+        const x = w * 0.1 + Math.random() * w * 0.8;
+        const y = h * 0.55 + Math.random() * h * 0.35;
+        this.spawnText(label, {
+            x,
+            y,
+            fontSize,
+            fill,
+            strokeWidth,
+            tier,
+            baseScale: tier >= 2 || golden ? 0.2 : 1,
+            vx: (Math.random() - 0.5) * (20 + tier * 15),
+            vy: -(60 + tier * 40 + Math.random() * 40) * (golden ? 0.5 : 1),
+            maxLife: (900 + tier * 350) * (golden ? 1.6 : 1),
+            spin: golden ? (Math.random() - 0.5) * 0.8 : 0,
+            rotation: (Math.random() - 0.5) * 0.15 * tier,
+        });
+        if (tier >= 4) this.shake(Math.min(2 + (tier - 4) * 3, 14));
+        if (tier >= 6 || golden)
+            this.flashScreen(golden ? 0xffe066 : 0xff2e5e, golden ? 0.12 : 0.2);
+    }
+
+    /** celebratory burst when an upgrade is bought: plus-signs erupt near the HUD edge */
+    celebrate(): void {
+        const w = this.app.screen.width;
+        const h = this.app.screen.height;
+        for (let i = 0; i < 10; i++) {
+            this.spawnText("+", {
+                x: w - 30 - Math.random() * 60,
+                y: h * 0.2 + Math.random() * h * 0.5,
+                fontSize: 16 + Math.random() * 14,
+                fill: GOLDEN_COLOR,
+                strokeWidth: 0,
+                tier: 0,
+                baseScale: 1,
+                vx: -(40 + Math.random() * 120),
+                vy: -(30 + Math.random() * 90),
+                maxLife: 600 + Math.random() * 300,
+                spin: (Math.random() - 0.5) * 2,
+                rotation: 0,
+            });
+        }
+        this.flashScreen(0xffe066, 0.06);
+    }
+
+    private spawnText(
+        label: string,
+        opts: {
+            x: number;
+            y: number;
+            fontSize: number;
+            fill: string;
+            strokeWidth: number;
+            tier: number;
+            baseScale: number;
+            vx: number;
+            vy: number;
+            maxLife: number;
+            spin: number;
+            rotation: number;
+        }
+    ): void {
         let text = this.pool.pop();
         if (!text) {
             // pool exhausted: recycle the oldest active crit
@@ -70,29 +146,33 @@ export class CritEngine {
             if (!oldest) return;
             text = oldest.text;
         }
-        const w = this.app.screen.width;
-        const h = this.app.screen.height;
-        const fontSize = 13 + tier * 9 + Math.min(Math.log10(damage + 1) * 2, 24);
-        text.style.fontSize = fontSize;
-        text.style.fill = TIER_COLORS[Math.min(tier, TIER_COLORS.length - 1)];
-        text.style.stroke = { color: "#1a0a00", width: tier >= 2 ? Math.min(tier, 4) : 0 };
-        text.text = formatNumber(damage);
-        text.position.set(w * 0.1 + Math.random() * w * 0.8, h * 0.55 + Math.random() * h * 0.35);
+        text.style.fontSize = opts.fontSize;
+        text.style.fill = opts.fill;
+        text.style.stroke = { color: "#1a0a00", width: opts.strokeWidth };
+        text.text = label;
+        text.position.set(opts.x, opts.y);
         text.alpha = 1;
-        text.rotation = (Math.random() - 0.5) * 0.15 * tier;
+        text.rotation = opts.rotation;
         text.visible = true;
-        const baseScale = tier >= 2 ? 0.2 : 1;
-        text.scale.set(baseScale);
+        text.scale.set(opts.baseScale);
         this.active.push({
             text,
-            vx: (Math.random() - 0.5) * (20 + tier * 15),
-            vy: -(60 + tier * 40 + Math.random() * 40),
+            vx: opts.vx,
+            vy: opts.vy,
             life: 0,
-            maxLife: 900 + tier * 350,
-            tier,
-            baseScale,
+            maxLife: opts.maxLife,
+            tier: opts.tier,
+            baseScale: opts.baseScale,
+            spin: opts.spin,
         });
-        if (tier >= 4) this.shake(Math.min(2 + (tier - 4) * 3, 14));
+    }
+
+    private flashScreen(color: number, alpha: number): void {
+        this.flash.clear();
+        this.flash.rect(0, 0, this.app.screen.width, this.app.screen.height).fill(color);
+        this.flashAlpha = Math.max(this.flashAlpha, alpha);
+        this.flash.alpha = this.flashAlpha;
+        this.flash.visible = true;
     }
 
     private shake(strength: number): void {
@@ -109,8 +189,9 @@ export class CritEngine {
             c.text.x += c.vx * dt;
             c.text.y += c.vy * dt;
             c.vy += 25 * dt;
+            c.text.rotation += c.spin * dt;
             // pop-in overshoot for real crits, then settle
-            if (c.tier >= 2) {
+            if (c.baseScale < 1) {
                 const pop = Math.min(c.life / 120, 1);
                 const overshoot = 1 + 0.4 * Math.sin(pop * Math.PI);
                 c.text.scale.set(c.baseScale + (1 - c.baseScale) * pop * overshoot + c.tier * 0.08);
@@ -121,6 +202,11 @@ export class CritEngine {
                 this.pool.push(c.text);
                 this.active.splice(i, 1);
             }
+        }
+        if (this.flashAlpha > 0) {
+            this.flashAlpha = Math.max(0, this.flashAlpha - dt * 0.8);
+            this.flash.alpha = this.flashAlpha;
+            if (this.flashAlpha === 0) this.flash.visible = false;
         }
         if (this.shakeTime > 0) {
             this.shakeTime -= dtMs;

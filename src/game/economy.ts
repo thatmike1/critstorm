@@ -1,5 +1,5 @@
 /** upgrade identifiers */
-export type UpgradeId = "critChance" | "critMulti" | "attackRate";
+export type UpgradeId = "baseDamage" | "critChance" | "critMulti" | "attackRate" | "golden";
 
 export interface UpgradeDef {
     id: UpgradeId;
@@ -11,6 +11,14 @@ export interface UpgradeDef {
 }
 
 export const UPGRADES: UpgradeDef[] = [
+    {
+        id: "baseDamage",
+        name: "Sharper Digits",
+        desc: "+1 base damage",
+        baseCost: 8,
+        costGrowth: 1.15,
+        maxLevel: 500,
+    },
     {
         id: "critChance",
         name: "Loaded Dice",
@@ -35,6 +43,14 @@ export const UPGRADES: UpgradeDef[] = [
         costGrowth: 1.18,
         maxLevel: 60,
     },
+    {
+        id: "golden",
+        name: "Golden Reels",
+        desc: "+0.5% golden hit chance (×25)",
+        baseCost: 500,
+        costGrowth: 1.35,
+        maxLevel: 30,
+    },
 ];
 
 export interface EconomyState {
@@ -49,10 +65,15 @@ export interface AttackResult {
     damage: number;
     /** number of consecutive successful crit rolls; 0 = normal hit */
     tier: number;
+    /** golden hits multiply the payout and get the royal treatment on screen */
+    golden: boolean;
 }
 
 /** crit chains cap out so damage stays finite even at high crit chance */
 export const MAX_TIER = 8;
+
+/** payout multiplier for golden hits */
+export const GOLDEN_MULTI = 25;
 
 export function createState(): EconomyState {
     return {
@@ -60,8 +81,12 @@ export function createState(): EconomyState {
         totalDamage: 0,
         elapsed: 0,
         attackTimer: 0,
-        levels: { critChance: 0, critMulti: 0, attackRate: 0 },
+        levels: { baseDamage: 0, critChance: 0, critMulti: 0, attackRate: 0, golden: 0 },
     };
+}
+
+export function baseDamage(s: EconomyState): number {
+    return 1 + s.levels.baseDamage;
 }
 
 export function critChance(s: EconomyState): number {
@@ -76,18 +101,22 @@ export function attacksPerSec(s: EconomyState): number {
     return 1 + s.levels.attackRate * 0.25;
 }
 
-export function baseDamage(): number {
-    return 1;
+export function goldenChance(s: EconomyState): number {
+    return Math.min(s.levels.golden * 0.005, 0.15);
 }
 
 /**
  * roll one attack: each consecutive successful crit roll raises the tier,
- * damage = base * multi^tier — this chain is the whole spectacle arc
+ * damage = base * multi^tier — this chain is the whole spectacle arc;
+ * an independent golden roll multiplies the payout again
  */
 export function rollAttack(s: EconomyState, rng: () => number): AttackResult {
     let tier = 0;
     while (tier < MAX_TIER && rng() < critChance(s)) tier++;
-    return { damage: baseDamage() * Math.pow(critMulti(s), tier), tier };
+    const golden = rng() < goldenChance(s);
+    let damage = baseDamage(s) * Math.pow(critMulti(s), tier);
+    if (golden) damage *= GOLDEN_MULTI;
+    return { damage, tier, golden };
 }
 
 export function upgradeCost(s: EconomyState, id: UpgradeId): number {
@@ -131,14 +160,52 @@ export function tick(s: EconomyState, dtSec: number, rng: () => number): AttackR
 export function expectedDamagePerAttack(s: EconomyState): number {
     const p = critChance(s);
     const m = critMulti(s);
+    const base = baseDamage(s);
     let total = 0;
     for (let t = 0; t < MAX_TIER; t++) {
-        total += Math.pow(p, t) * (1 - p) * baseDamage() * Math.pow(m, t);
+        total += Math.pow(p, t) * (1 - p) * base * Math.pow(m, t);
     }
-    total += Math.pow(p, MAX_TIER) * baseDamage() * Math.pow(m, MAX_TIER);
-    return total;
+    total += Math.pow(p, MAX_TIER) * base * Math.pow(m, MAX_TIER);
+    return total * (1 + goldenChance(s) * (GOLDEN_MULTI - 1));
 }
 
 export function expectedDps(s: EconomyState): number {
     return expectedDamagePerAttack(s) * attacksPerSec(s);
+}
+
+/** storm ranks: flavor progression by lifetime damage dealt */
+export const RANKS = [
+    { name: "dust", threshold: 0 },
+    { name: "drizzle", threshold: 100 },
+    { name: "shower", threshold: 1_000 },
+    { name: "downpour", threshold: 10_000 },
+    { name: "storm", threshold: 100_000 },
+    { name: "tempest", threshold: 1_000_000 },
+    { name: "maelstrom", threshold: 10_000_000 },
+    { name: "cataclysm", threshold: 100_000_000 },
+    { name: "apocalypse", threshold: 1_000_000_000 },
+    { name: "CRITSTORM", threshold: 10_000_000_000 },
+] as const;
+
+export interface RankInfo {
+    name: string;
+    /** 0..1 progress toward the next rank, 1 at max rank */
+    progress: number;
+    next: string | null;
+}
+
+export function rankInfo(s: EconomyState): RankInfo {
+    let idx = 0;
+    for (let i = 0; i < RANKS.length; i++) {
+        if (s.totalDamage >= RANKS[i].threshold) idx = i;
+    }
+    const current = RANKS[idx];
+    const next = RANKS[idx + 1] ?? null;
+    if (!next) return { name: current.name, progress: 1, next: null };
+    const span = next.threshold - current.threshold;
+    return {
+        name: current.name,
+        progress: Math.min((s.totalDamage - current.threshold) / span, 1),
+        next: next.name,
+    };
 }

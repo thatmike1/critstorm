@@ -41,6 +41,64 @@ body,
   text-transform: uppercase;
 }
 
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mute {
+  background: none;
+  border: 1px solid #33334d;
+  border-radius: 4px;
+  color: #9a9ab0;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.mute:hover {
+  border-color: #ffd75e;
+  color: #e8e8f0;
+}
+
+.rank {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.rank-label {
+  font-size: 13px;
+  color: #9a9ab0;
+}
+
+.rank-label strong {
+  color: #ffd75e;
+  letter-spacing: 1px;
+}
+
+.rank-next {
+  color: #55556d;
+}
+
+.rank-bar {
+  height: 6px;
+  background: #1a1a2a;
+  border: 1px solid #33334d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.rank-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ffd75e, #ffab2e);
+  transform-origin: left;
+  transition: transform 0.2s;
+}
+
 .stat-big {
   font-size: 24px;
   font-weight: 700;
@@ -81,6 +139,27 @@ body,
 .upgrades button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.upgrades button.bought {
+  animation: bought-pulse 0.35s ease-out;
+}
+
+@keyframes bought-pulse {
+  0% {
+    transform: scale(1);
+    border-color: #ffd75e;
+    box-shadow: 0 0 0 rgba(255, 215, 94, 0.8);
+  }
+  30% {
+    transform: scale(1.05);
+    box-shadow: 0 0 18px rgba(255, 215, 94, 0.5);
+  }
+  100% {
+    transform: scale(1);
+    border-color: #33334d;
+    box-shadow: 0 0 0 rgba(255, 215, 94, 0);
+  }
 }
 
 .upgrade-name {
