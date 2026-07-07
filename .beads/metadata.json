@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "critstorm",
+  "project_id": "9823a8fe-0d5a-4cba-8f0e-73ecf9672c7b"
+}
