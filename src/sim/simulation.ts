@@ -1,0 +1,1078 @@
+import {
+    boilPoint,
+    CONDUCT,
+    density,
+    emitTemp,
+    freezePoint,
+    ignitionPoint,
+    isDissolvable,
+    isMovable,
+    Mat,
+    meltPoint,
+} from "./materials";
+import { encodeRLE } from "./scene";
+
+const CS = 16; // chunk size (cells per side)
+
+// ---- heat field tuning ---------------------------------------------------
+const AMBIENT = 20; // resting temperature everything relaxes toward
+const DIFFUSE = 0.13; // fraction of the (conductivity-weighted) neighbor gradient
+// that flows per frame. Stable because the harmonic-mean face weight caps at 1,
+// so the worst-case stencil is 1 - 4*DIFFUSE = 0.48 (convex). Lower than the old
+// 0.2 to shorten the decay length (~2.5 cells) so a hot pocket's halo stays tight.
+const COOL = 0.02; // Newtonian cooling: each cell relaxes COOL toward AMBIENT every
+// frame regardless of neighbors. This is the interior heat sink that lets a lone
+// hot pocket actually decay to ambient instead of lingering forever.
+const EPS = 0.5; // heat delta below which a cell is "settled" and stops waking
+// Cooling-only cells drift toward AMBIENT by COOL*(h-AMBIENT); that delta drops
+// under EPS while still ~25° from ambient, which would freeze a pocket mid-decay
+// once its chunk sleeps. So the cooling tail uses its own (wider) band:
+const AMBIENT_BAND = 2; // keep a cell's chunk awake while |h - AMBIENT| > this
+
+// Lava crusts when a coolant-adjacent cell cools below emitTemp[LAVA] minus this
+// margin. The slow new solver drops a water-touching lava cell only ~60°/frame,
+// so the gate sits just under the emission temperature (700 - 50 = 650) to catch
+// that drop. A large delta (e.g. 150 -> threshold 550) is unreachable while the
+// cell keeps re-emitting and would leave open-air quench broken.
+const LAVA_QUENCH_DELTA = 50;
+
+// Background color (matches the canvas frame in CSS).
+const BG_R = 16,
+    BG_G = 18,
+    BG_B = 22;
+const A = 0xff000000;
+
+function rgba(r: number, g: number, b: number): number {
+    // Pack into the little-endian RGBA layout expected by Uint32 -> ImageData.
+    return (A | (b << 16) | (g << 8) | r) >>> 0;
+}
+function clamp(v: number): number {
+    return v < 0 ? 0 : v > 255 ? 255 : v;
+}
+function shade(r: number, g: number, b: number, v: number): number {
+    return rgba(clamp(r + v), clamp(g + v), clamp(b + v));
+}
+// Blend a color toward the background by factor t (1 = full color, 0 = bg).
+function blendBg(r: number, g: number, b: number, t: number): number {
+    const tt = t < 0 ? 0 : t > 1 ? 1 : t;
+    return rgba(
+        clamp(BG_R + (r - BG_R) * tt),
+        clamp(BG_G + (g - BG_G) * tt),
+        clamp(BG_B + (b - BG_B) * tt)
+    );
+}
+
+const BG = rgba(BG_R, BG_G, BG_B);
+
+/**
+ * headless falling-sand core: cells + heat field + step logic on plain typed
+ * arrays, with no DOM/canvas dependency. writeImage() fills the core-owned
+ * `buf32` (scene) and `glow32` (emissive) pixel buffers so a Pixi texture layer
+ * or the canvas renderer in simulation-renderer.ts can blit them; the core
+ * itself never touches document/ImageData, so it steps under plain Node.
+ */
+export class Simulation {
+    readonly W: number;
+    readonly H: number;
+
+    cells: Uint8Array; // material id per cell
+    life: Uint8Array; // generic per-cell counter (fire/smoke/steam lifespan)
+    extra: Uint8Array; // per-cell random seed for color dithering / flicker
+    stamp: Int32Array; // last frame a cell was touched (prevents double-moves)
+    heat: Float32Array; // temperature per cell; diffuses each frame (Eulerian)
+    private heatNext: Float32Array; // double buffer for Jacobi-style diffusion
+
+    frame = 0;
+    count = 0;
+    emissive = 0; // fire/lava cell count this frame; lets renderer skip glow passes
+    private showTemp = false; // debug heatmap: render heat as a blue->red ramp
+
+    // Dirty-chunk scheduler: only chunks flagged active get simulated.
+    readonly chunkW: number;
+    readonly chunkH: number;
+    private active: Uint8Array;
+    private activeNext: Uint8Array;
+
+    // Pixel buffers (1px per cell), owned by the core and filled in writeImage().
+    // Plain Uint32Arrays (no ImageData backing) so the core stays headless.
+    // Allocated once and never reassigned — consumers (the canvas renderer's
+    // ImageData, a Pixi texture) view these buffers zero-copy, so reallocating
+    // them would silently detach every view. Typed ArrayBuffer-backed so those
+    // views typecheck (ImageData rejects SharedArrayBuffer).
+    readonly buf32: Uint32Array<ArrayBuffer>;
+    readonly glow32: Uint32Array<ArrayBuffer>;
+
+    constructor(W: number, H: number) {
+        this.W = W;
+        this.H = H;
+        const n = W * H;
+        this.cells = new Uint8Array(n);
+        this.life = new Uint8Array(n);
+        this.extra = new Uint8Array(n);
+        this.stamp = new Int32Array(n).fill(-1);
+        this.heat = new Float32Array(n).fill(AMBIENT);
+        this.heatNext = new Float32Array(n);
+        for (let i = 0; i < n; i++) this.extra[i] = (Math.random() * 256) | 0;
+
+        this.chunkW = Math.ceil(W / CS);
+        this.chunkH = Math.ceil(H / CS);
+        this.active = new Uint8Array(this.chunkW * this.chunkH);
+        // Start with everything queued so the first frame simulates the whole grid.
+        this.activeNext = new Uint8Array(this.chunkW * this.chunkH).fill(1);
+
+        this.buf32 = new Uint32Array(n);
+        this.glow32 = new Uint32Array(n);
+    }
+
+    // ---- low-level cell ops ------------------------------------------------
+
+    private matAt(x: number, y: number): number {
+        if (x < 0 || y < 0 || x >= this.W || y >= this.H) return Mat.WALL; // treat edges as wall
+        return this.cells[y * this.W + x];
+    }
+
+    /** Wake the chunk of (x,y) and any neighbor chunk a 3x3 neighbor lands in. */
+    private wake(x: number, y: number): void {
+        for (let dy = -1; dy <= 1; dy++) {
+            const ny = y + dy;
+            if (ny < 0 || ny >= this.H) continue;
+            for (let dx = -1; dx <= 1; dx++) {
+                const nx = x + dx;
+                if (nx < 0 || nx >= this.W) continue;
+                this.activeNext[((ny / CS) | 0) * this.chunkW + ((nx / CS) | 0)] = 1;
+            }
+        }
+    }
+
+    private assignSpawnLife(i: number, mat: number): void {
+        if (mat === Mat.FIRE) this.life[i] = 90 + ((Math.random() * 50) | 0);
+        else if (mat === Mat.SMOKE) this.life[i] = 90 + ((Math.random() * 100) | 0);
+        else if (mat === Mat.STEAM) this.life[i] = Math.min(255, 130 + ((Math.random() * 120) | 0));
+        else if (mat === Mat.LIGHTNING)
+            this.life[i] = 5 + ((Math.random() * 5) | 0); // brief flash
+        else this.life[i] = 0;
+    }
+
+    /** Seed a freshly-set source cell (fire/lava/ice) at its emission temperature. */
+    private assignSpawnHeat(i: number, mat: number): void {
+        if (emitTemp[mat]) this.heat[i] = emitTemp[mat];
+    }
+
+    /** Set a cell to a material, refreshing its random seed + lifespan, and wake it. */
+    private setCell(x: number, y: number, mat: number): void {
+        const i = y * this.W + x;
+        this.cells[i] = mat;
+        this.extra[i] = (Math.random() * 256) | 0;
+        this.assignSpawnLife(i, mat);
+        this.assignSpawnHeat(i, mat);
+        this.stamp[i] = this.frame;
+        this.wake(x, y);
+    }
+
+    /**
+     * Swap two cells (material + life + seed) and mark both touched + awake.
+     * `heat` is deliberately NOT swapped: temperature is a property of *space*
+     * (Eulerian field), not of the particle. A moving source re-asserts its
+     * emission temperature at its new cell next frame, so this self-corrects.
+     */
+    private swap(x1: number, y1: number, x2: number, y2: number): void {
+        const i1 = y1 * this.W + x1;
+        const i2 = y2 * this.W + x2;
+        const c = this.cells[i1];
+        this.cells[i1] = this.cells[i2];
+        this.cells[i2] = c;
+        const l = this.life[i1];
+        this.life[i1] = this.life[i2];
+        this.life[i2] = l;
+        const e = this.extra[i1];
+        this.extra[i1] = this.extra[i2];
+        this.extra[i2] = e;
+        this.stamp[i1] = this.frame;
+        this.stamp[i2] = this.frame;
+        this.wake(x1, y1);
+        this.wake(x2, y2);
+    }
+
+    // ---- public API --------------------------------------------------------
+
+    /** Paint a filled circle of `mat` (EMPTY = erase) centered at grid (cx,cy). */
+    paint(cx: number, cy: number, r: number, mat: number): void {
+        const r2 = r * r;
+        for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) {
+                if (dx * dx + dy * dy > r2) continue;
+                const x = cx + dx,
+                    y = cy + dy;
+                if (x < 0 || y < 0 || x >= this.W || y >= this.H) continue;
+                // Don't overwrite indestructible walls unless we're erasing.
+                if (mat !== Mat.EMPTY && this.cells[y * this.W + x] === Mat.WALL) continue;
+                this.setCell(x, y, mat);
+            }
+        }
+    }
+
+    /** materials a bolt arcs *through* (and superheats) instead of stopping at. */
+    private isConductor(m: number): boolean {
+        return m === Mat.WATER || m === Mat.METAL || m === Mat.FILINGS;
+    }
+
+    /**
+     * Deposit the bolt at one cell. Returns true if the cell stops the bolt.
+     * Heat is injected regardless of material, so ignition/boil/melt all emerge
+     * from the heat field: empty air becomes a visible LIGHTNING flash, conductors
+     * (water) are superheated and passed through, and any other matter is the
+     * strike point — heated, then the bolt terminates there.
+     */
+    private zap(x: number, y: number): boolean {
+        if (x < 0 || y < 0 || x >= this.W || y >= this.H) return true;
+        const i = y * this.W + x;
+        const m = this.cells[i];
+        if (this.heat[i] < emitTemp[Mat.LIGHTNING]) this.heat[i] = emitTemp[Mat.LIGHTNING];
+        this.wake(x, y);
+        if (m === Mat.EMPTY) {
+            this.setCell(x, y, Mat.LIGHTNING); // re-seeds heat via assignSpawnHeat
+            return false;
+        }
+        // A jagged leader can re-cross a cell it already lit; passing through its own
+        // plasma (rather than dead-ending on it) is what lets a zigzagging bolt still
+        // reach the ground instead of fizzling in mid-air on a self-intersection.
+        if (m === Mat.LIGHTNING) return false;
+        return !this.isConductor(m); // conductors pass through; everything else stops
+    }
+
+    /**
+     * Horizontal pull toward the nearest conductor a few rows below — this is what
+     * makes a bolt bend toward a water pool rather than fall dead straight.
+     * Returns -1 (pull left), +1 (pull right), or 0 (none in reach).
+     */
+    private conductorPull(x: number, y: number): number {
+        const reach = 14;
+        for (let r = 1; r <= 4; r++) {
+            const yy = y + r;
+            if (yy >= this.H) break;
+            for (let d = 1; d <= reach; d++) {
+                if (this.isConductor(this.matAt(x - d, yy))) return -1;
+                if (this.isConductor(this.matAt(x + d, yy))) return 1;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Walk a single jagged leader from (x,y): step mostly downward with horizontal
+     * jitter, bend toward conductors, and occasionally fork a shorter child bolt.
+     * Recurses for branches (depth-capped); each step writes via zap().
+     */
+    private bolt(x: number, y: number, depth: number, maxSteps: number): void {
+        for (let steps = 0; steps < maxSteps; steps++) {
+            if (this.zap(x, y)) return; // hit ground / solid / edge
+            if (y >= this.H - 1) return; // reached the floor
+            const pull = this.conductorPull(x, y);
+            const jitter = Math.random() < 0.34 ? -1 : Math.random() < 0.5 ? 1 : 0;
+            let dx = jitter + pull;
+            dx = dx < -1 ? -1 : dx > 1 ? 1 : dx;
+            const dy = Math.random() < 0.82 ? 1 : 0;
+            const nx = x + dx;
+            let ny = y + dy;
+            if (nx === x && ny === y) ny = y + 1; // never stall in place
+            // fork a child bolt sideways now and then for that branched look
+            if (depth < 2 && Math.random() < 0.07) {
+                this.bolt(x + (Math.random() < 0.5 ? -1 : 1), y + 1, depth + 1, maxSteps >> 1);
+            }
+            x = nx;
+            y = ny;
+        }
+    }
+
+    /**
+     * Fire an instant lightning bolt from (sx,sy) — the public click-to-strike
+     * entry point. The bolt and all its branches are traced synchronously; the
+     * resulting LIGHTNING cells then flash and fade over the next few frames.
+     */
+    strike(sx: number, sy: number): void {
+        if (sx < 0 || sy < 0 || sx >= this.W || sy >= this.H) return;
+        this.bolt(sx, sy, 0, this.H + 40);
+    }
+
+    /** try to slide a filing one cell toward (tx,ty); succeeds into empty or a
+     * lighter movable (so it can be dragged up through water). */
+    private tryMagnetMove(x: number, y: number, tx: number, ty: number): boolean {
+        if (tx < 0 || ty < 0 || tx >= this.W || ty >= this.H) return false;
+        const tm = this.cells[ty * this.W + tx];
+        if (tm === Mat.EMPTY) {
+            this.swap(x, y, tx, ty);
+            return true;
+        }
+        if (isMovable(tm) && density[Mat.FILINGS] > density[tm]) {
+            this.swap(x, y, tx, ty);
+            return true;
+        }
+        return false;
+    }
+
+    /** step a filing one cell along (sx,sy), falling back to the cardinal axes so
+     * it still makes progress when the diagonal is blocked. */
+    private pullStep(x: number, y: number, sx: number, sy: number): void {
+        if (sx !== 0 && sy !== 0 && this.tryMagnetMove(x, y, x + sx, y + sy)) return;
+        if (sx !== 0 && this.tryMagnetMove(x, y, x + sx, y)) return;
+        if (sy !== 0 && this.tryMagnetMove(x, y, x, y + sy)) return;
+    }
+
+    /**
+     * Magnet tool: nudge every FILINGS cell in radius one step toward (attract) or
+     * away from (repel) the pointer. Positions are SNAPSHOTTED first, then moved —
+     * crucially NOT gated on the per-frame `stamp`, because the render loop runs
+     * the sim step before this, so falling filings are already stamped this frame;
+     * a stamp guard would let gravity always win and the magnet would feel dead.
+     * Snapshotting instead guarantees each filing is considered exactly once.
+     * Nearest-to-pointer filings move first so inner ones clear room for the rest.
+     */
+    magnet(cx: number, cy: number, r: number, attract: boolean): void {
+        const r2 = r * r;
+        const pts: Array<{ x: number; y: number; d: number }> = [];
+        for (let dy = -r; dy <= r; dy++) {
+            const y = cy + dy;
+            if (y < 0 || y >= this.H) continue;
+            for (let dx = -r; dx <= r; dx++) {
+                const d = dx * dx + dy * dy;
+                if (d > r2) continue;
+                const x = cx + dx;
+                if (x < 0 || x >= this.W) continue;
+                if (this.cells[y * this.W + x] === Mat.FILINGS) pts.push({ x, y, d });
+            }
+        }
+        // attract: pull the closest first (they vacate cells the outer ones flow
+        // into); repel: push the farthest first so the column unpacks outward.
+        pts.sort((a, b) => (attract ? a.d - b.d : b.d - a.d));
+        for (const p of pts) {
+            if (this.cells[p.y * this.W + p.x] !== Mat.FILINGS) continue; // moved already
+            let sx = p.x < cx ? 1 : p.x > cx ? -1 : 0;
+            let sy = p.y < cy ? 1 : p.y > cy ? -1 : 0;
+            if (!attract) {
+                sx = -sx;
+                sy = -sy;
+            }
+            if (sx === 0 && sy === 0) continue; // sitting on the pointer
+            this.pullStep(p.x, p.y, sx, sy);
+        }
+    }
+
+    clear(): void {
+        this.cells.fill(Mat.EMPTY);
+        this.life.fill(0);
+        this.heat.fill(AMBIENT);
+        this.activeNext.fill(1);
+    }
+
+    /** serialize the current grid (materials only) to a compact byte stream. */
+    snapshot(): Uint8Array<ArrayBuffer> {
+        return encodeRLE(this.cells, this.W, this.H);
+    }
+
+    /**
+     * replace the grid with a previously decoded `cells` array. returns false on
+     * a dimension mismatch (caller should surface a friendly error) and leaves
+     * the grid untouched. on success it re-establishes the sim invariants:
+     * lifespan materials are re-seeded, the color seed is regenerated, no cell is
+     * stamped, and every chunk is woken so the restored scene actually simulates.
+     */
+    restore(cells: Uint8Array): boolean {
+        const n = this.W * this.H;
+        if (cells.length !== n) return false;
+        this.cells.set(cells);
+        this.life.fill(0);
+        this.heat.fill(AMBIENT);
+        for (let i = 0; i < n; i++) {
+            this.extra[i] = (Math.random() * 256) | 0;
+            // fire/smoke/steam need a lifespan or they'd die on the first frame.
+            this.assignSpawnLife(i, this.cells[i]);
+            // re-seed source temperatures so fire/lava/ice load at the right heat.
+            this.assignSpawnHeat(i, this.cells[i]);
+        }
+        this.stamp.fill(-1);
+        this.activeNext.fill(1);
+        return true;
+    }
+
+    step(times = 1): void {
+        for (let t = 0; t < times; t++) this.stepOnce();
+    }
+
+    /** toggle the debug heatmap overlay (read by colorOf at render time). */
+    setShowTemp(on: boolean): void {
+        this.showTemp = on;
+    }
+
+    private stepOnce(): void {
+        this.frame++;
+        // Consume the queue built last frame; start a fresh one.
+        const tmp = this.active;
+        this.active = this.activeNext;
+        this.activeNext = tmp;
+        this.activeNext.fill(0);
+
+        const { W, H, chunkW, chunkH } = this;
+        const dir = this.frame & 1 ? 1 : -1; // alternate horizontal scan to kill bias
+
+        for (let cy = chunkH - 1; cy >= 0; cy--) {
+            for (let cx = 0; cx < chunkW; cx++) {
+                if (!this.active[cy * chunkW + cx]) continue;
+                const x0 = cx * CS,
+                    x1 = Math.min(x0 + CS, W);
+                const y0 = cy * CS,
+                    y1 = Math.min(y0 + CS, H);
+                for (let y = y1 - 1; y >= y0; y--) {
+                    if (dir > 0) for (let x = x0; x < x1; x++) this.update(x, y);
+                    else for (let x = x1 - 1; x >= x0; x--) this.update(x, y);
+                }
+            }
+        }
+
+        // Heat diffuses AFTER the material walk: sources deposit their temperature
+        // for this frame (emission in updateFire/updateLava/ICE), then it spreads.
+        this.diffuse();
+    }
+
+    /**
+     * Jacobi-style heat diffusion over active chunks (read `heat`, write
+     * `heatNext`, then swap). Jacobi (vs in-place) keeps the pass symmetric and
+     * order-independent — unlike the material walk, heat must have no directional
+     * bias. This pass only ever writes `heatNext`, never `cells`, so it moves no
+     * particle and the `stamp` double-move contract is untouched.
+     */
+    private diffuse(): void {
+        const { W, H, chunkW, chunkH, cells, heat, heatNext } = this;
+        // full copy so cells in sleeping chunks carry their temperature forward
+        // unchanged across the buffer swap (no stale/zero values when they wake).
+        heatNext.set(heat);
+        for (let cy = 0; cy < chunkH; cy++) {
+            for (let cx = 0; cx < chunkW; cx++) {
+                if (!this.active[cy * chunkW + cx]) continue;
+                const x0 = cx * CS,
+                    x1 = Math.min(x0 + CS, W);
+                const y0 = cy * CS,
+                    y1 = Math.min(y0 + CS, H);
+                for (let y = y0; y < y1; y++) {
+                    for (let x = x0; x < x1; x++) {
+                        const i = y * W + x;
+                        const h = heat[i];
+                        const ci = CONDUCT[cells[i]];
+                        // Per face, heat flows at the harmonic mean of the two cells'
+                        // conductivities (series resistance: the duller side throttles the
+                        // boundary). An OOB neighbor reads as AMBIENT air (heat=AMBIENT,
+                        // cond=1). A cond-0 WALL forces kFace=0 on every touching face, so it
+                        // neither conducts nor leaks — thermally inert with no special case.
+                        // unrolled 4-neighbor face flow (no per-cell array allocation).
+                        let flow = 0;
+                        {
+                            const hN = y > 0 ? heat[i - W] : AMBIENT;
+                            const cn = y > 0 ? CONDUCT[cells[i - W]] : 1;
+                            flow += ((2 * ci * cn) / (ci + cn + 1e-6)) * (hN - h);
+                        }
+                        {
+                            const hN = y < H - 1 ? heat[i + W] : AMBIENT;
+                            const cn = y < H - 1 ? CONDUCT[cells[i + W]] : 1;
+                            flow += ((2 * ci * cn) / (ci + cn + 1e-6)) * (hN - h);
+                        }
+                        {
+                            const hN = x > 0 ? heat[i - 1] : AMBIENT;
+                            const cn = x > 0 ? CONDUCT[cells[i - 1]] : 1;
+                            flow += ((2 * ci * cn) / (ci + cn + 1e-6)) * (hN - h);
+                        }
+                        {
+                            const hN = x < W - 1 ? heat[i + 1] : AMBIENT;
+                            const cn = x < W - 1 ? CONDUCT[cells[i + 1]] : 1;
+                            flow += ((2 * ci * cn) / (ci + cn + 1e-6)) * (hN - h);
+                        }
+                        let next = h + DIFFUSE * flow;
+                        // Newtonian cooling toward ambient: the interior heat sink that lets
+                        // an isolated hot pocket decay instead of lingering at the boundary.
+                        next += COOL * (AMBIENT - next);
+                        // Stay awake while heat is still moving OR while meaningfully off
+                        // ambient — the latter decouples the cooling tail from EPS so a slow
+                        // exponential decay doesn't sleep at ~45° absolute. Once a cell is
+                        // both settled AND within the ambient band, snap it exactly to
+                        // ambient as it goes to sleep so no residual warmth is frozen in.
+                        const moving = next - h > EPS || h - next > EPS;
+                        const offAmbient =
+                            next - AMBIENT > AMBIENT_BAND || AMBIENT - next > AMBIENT_BAND;
+                        if (moving || offAmbient) this.wake(x, y);
+                        else next = AMBIENT;
+                        heatNext[i] = next;
+                    }
+                }
+            }
+        }
+        this.heat = heatNext;
+        this.heatNext = heat;
+    }
+
+    // ---- per-cell update dispatch -----------------------------------------
+
+    private update(x: number, y: number): void {
+        const i = y * this.W + x;
+        if (this.stamp[i] === this.frame) return; // already moved/handled this frame
+        const m = this.cells[i];
+        switch (m) {
+            case Mat.EMPTY:
+            case Mat.WALL:
+            case Mat.STONE:
+            case Mat.METAL:
+            case Mat.GLASS:
+                return;
+            case Mat.SAND:
+                // sustained lava heat fuses sand into glass; probabilistic so a pool
+                // forms a glass crust gradually rather than flashing the whole bed.
+                if (this.heat[i] >= meltPoint[Mat.SAND] && Math.random() < 0.05) {
+                    this.setCell(x, y, Mat.GLASS);
+                    return;
+                }
+                this.updatePowder(x, y, m);
+                return;
+            case Mat.FILINGS:
+                this.updatePowder(x, y, m);
+                return;
+            case Mat.GUNPOWDER: {
+                // wet gunpowder is a soggy clump: a water 4-neighbor both shields it
+                // from ignition AND pins it in place (it neither detonates nor sinks/
+                // flows while wet). stateless — re-arms the instant the water moves off.
+                if (this.nearWater(x, y)) return;
+                if (this.heat[i] >= ignitionPoint[Mat.GUNPOWDER]) {
+                    this.explode(x, y);
+                    return;
+                }
+                this.updatePowder(x, y, m);
+                return;
+            }
+            case Mat.WATER:
+                this.updateWater(x, y, i, m);
+                return;
+            case Mat.OIL:
+                if (this.heat[i] >= ignitionPoint[Mat.OIL] && Math.random() < 0.3) {
+                    this.setCell(x, y, Mat.FIRE);
+                    return;
+                }
+                this.updateLiquid(x, y, m);
+                return;
+            case Mat.ACID:
+                this.updateAcid(x, y);
+                return;
+            case Mat.LAVA:
+                this.updateLava(x, y);
+                return;
+            case Mat.FIRE:
+                this.updateFire(x, y, i);
+                return;
+            case Mat.LIGHTNING:
+                this.updateLightning(x, y, i);
+                return;
+            case Mat.SMOKE:
+                this.updateGas(x, y, i);
+                return;
+            case Mat.STEAM:
+                this.updateSteam(x, y, i);
+                return;
+            case Mat.WOOD:
+                if (this.heat[i] >= ignitionPoint[Mat.WOOD] && Math.random() < 0.1)
+                    this.setCell(x, y, Mat.FIRE);
+                return;
+            case Mat.PLANT:
+                if (this.heat[i] >= ignitionPoint[Mat.PLANT] && Math.random() < 0.12) {
+                    this.setCell(x, y, Mat.FIRE);
+                    return;
+                }
+                this.growPlant(x, y);
+                return;
+            case Mat.ICE:
+                this.updateIce(x, y);
+                return;
+        }
+    }
+
+    // ---- movement primitives ----------------------------------------------
+
+    /** Move (x,y) into (tx,ty) if empty, or swap if target is a lighter movable. */
+    private tryMove(x: number, y: number, tx: number, ty: number, m: number): boolean {
+        if (tx < 0 || ty < 0 || tx >= this.W || ty >= this.H) return false;
+        const tm = this.cells[ty * this.W + tx];
+        if (tm === Mat.EMPTY) {
+            this.swap(x, y, tx, ty);
+            return true;
+        }
+        if (isMovable(tm) && density[m] > density[tm]) {
+            this.swap(x, y, tx, ty);
+            return true;
+        }
+        return false;
+    }
+
+    /** Like tryMove, but for rising gases: swap upward through denser movables. */
+    private tryRise(x: number, y: number, tx: number, ty: number, m: number): boolean {
+        if (tx < 0 || ty < 0 || tx >= this.W || ty >= this.H) return false;
+        const tm = this.cells[ty * this.W + tx];
+        if (tm === Mat.EMPTY) {
+            this.swap(x, y, tx, ty);
+            return true;
+        }
+        if (isMovable(tm) && density[tm] > density[m]) {
+            this.swap(x, y, tx, ty);
+            return true;
+        }
+        return false;
+    }
+
+    private updatePowder(x: number, y: number, m: number): void {
+        if (this.tryMove(x, y, x, y + 1, m)) return;
+        const first = Math.random() < 0.5 ? -1 : 1;
+        if (this.tryMove(x, y, x + first, y + 1, m)) return;
+        if (this.tryMove(x, y, x - first, y + 1, m)) return;
+    }
+
+    private updateLiquid(x: number, y: number, m: number): void {
+        if (this.tryMove(x, y, x, y + 1, m)) return;
+        const first = Math.random() < 0.5 ? -1 : 1;
+        if (this.tryMove(x, y, x + first, y + 1, m)) return;
+        if (this.tryMove(x, y, x - first, y + 1, m)) return;
+        // Horizontal spread to seek its own level.
+        if (this.tryMove(x, y, x + first, y, m)) return;
+        if (this.tryMove(x, y, x - first, y, m)) return;
+    }
+
+    private updateGas(x: number, y: number, i: number): void {
+        if (this.life[i] <= 0) {
+            this.setCell(x, y, Mat.EMPTY);
+            return;
+        }
+        this.life[i]--;
+        this.wake(x, y); // stay awake while alive (so it keeps fading even if stuck)
+        const m = this.cells[i];
+        const first = Math.random() < 0.5 ? -1 : 1;
+        if (this.tryRise(x, y, x, y - 1, m)) return;
+        if (this.tryRise(x, y, x + first, y - 1, m)) return;
+        if (this.tryRise(x, y, x - first, y - 1, m)) return;
+        if (this.tryRise(x, y, x + first, y, m)) return;
+        if (this.tryRise(x, y, x - first, y, m)) return;
+    }
+
+    // ---- reactive materials ------------------------------------------------
+
+    /**
+     * Water: heat-driven phase changes, then liquid movement. Flammables/sources
+     * ignite emergently via the heat field, so water no longer special-cases its
+     * neighbors — it reacts only to its own cell temperature.
+     */
+    private updateWater(x: number, y: number, i: number, m: number): void {
+        if (this.heat[i] >= boilPoint[Mat.WATER] && Math.random() < 0.4) {
+            this.setCell(x, y, Mat.STEAM); // boil -> steam (carries the hot temp up)
+            return;
+        }
+        if (this.heat[i] <= freezePoint[Mat.WATER]) {
+            // cold-driven freeze, deterministic. No stochastic gate is needed for a
+            // gradual front: the rewritten heat field is LOCAL (conductivity throttle
+            // + Newtonian cooling), so only the cold frontier sits below 0 at any
+            // instant. The freeze front therefore advances one shell at a time as the
+            // cold diffuses outward — a whole pool can't dip below 0 at once and
+            // flash-freeze. (A probabilistic gate here instead loses the race against
+            // unsupported water draining away before it can freeze — see the
+            // ice-grows-by-freezing guardrail.)
+            this.setCell(x, y, Mat.ICE);
+            return;
+        }
+        this.updateLiquid(x, y, m);
+    }
+
+    /**
+     * Steam: rarely condenses back to water once cooled, otherwise rises & fades.
+     * Condensation is intentionally a low-probability event: making it certain
+     * turns a plume into a closed boil->rise->condense->rain->boil convection loop
+     * (the "breathing cloud"). At ~2%/frame most steam dissipates via its lifespan
+     * instead, so only a little water drizzles back and the loop never sustains.
+     */
+    private updateSteam(x: number, y: number, i: number): void {
+        if (this.heat[i] <= freezePoint[Mat.STEAM] && Math.random() < 0.02) {
+            this.setCell(x, y, Mat.WATER); // condense — occasional water-cycle close
+            return;
+        }
+        this.updateGas(x, y, i); // rises and fades by lifespan in updateGas
+    }
+
+    private updateFire(x: number, y: number, i: number): void {
+        if (this.life[i] <= 0) {
+            // Burn out into a puff of smoke most of the time.
+            this.setCell(x, y, Math.random() < 0.6 ? Mat.SMOKE : Mat.EMPTY);
+            return;
+        }
+        this.life[i] -= 1 + ((Math.random() * 2) | 0);
+
+        // Wet-count snuff. A flame OVERWHELMED by wet matter (>=2 water/steam
+        // 4-neighbors) is drowning: skip re-emission so its heat craters and puff
+        // out to smoke. A flame with at most one wet neighbor (e.g. water directly
+        // above only) is the boil case — it re-emits and boils that neighbor.
+        // Because a boiled neighbor becomes STEAM (itself wet), the edge of a
+        // submerged fire body flips from coolN=1 to coolN>=2 and erodes inward,
+        // instead of surviving forever inside a steam bubble.
+        const coolN = this.wetNeighbors(x, y);
+        if (coolN >= 2) {
+            // a tiny survival chance keeps a drowning edge flickering for a frame
+            // rather than blinking out flatly; mostly it converts straight to smoke.
+            if (Math.random() < 0.92) {
+                this.setCell(x, y, Mat.SMOKE);
+                return;
+            }
+            this.wake(x, y);
+            return;
+        }
+        // A single coolant neighbor is the boil case (e.g. water directly above):
+        // the flame still re-emits its 1200° (below) and boils that neighbor, but it
+        // also snuffs at a high rate. That erodes the wet EDGE of a submerged body
+        // inward even where each cell touches only one water cell — without it a
+        // pinned body's flat edges (coolN === 1) would survive and boil forever,
+        // only the corners (coolN >= 2) dying. Boiling is near-instant at 1200°, so a
+        // genuine boil-from-below flame still pushes enough heat up before it dies.
+        if (coolN === 1 && Math.random() < 0.7) {
+            this.setCell(x, y, Mat.SMOKE);
+            return;
+        }
+
+        // re-assert emission temperature (diffusion bled it away last frame); this
+        // is what ignites/boils/melts neighbors once it spreads into them.
+        if (this.heat[i] < emitTemp[Mat.FIRE]) this.heat[i] = emitTemp[Mat.FIRE];
+        this.wake(x, y);
+
+        // Flames lick upward — but only when touching NO coolant (coolN === 0). A
+        // flame in contact with water/steam can't climb: it can neither bubble up
+        // through what's dousing it nor "drill" a path by boiling a neighbor to
+        // steam and rising into the vacated cell, because it stays coolant-adjacent
+        // the whole way. So a submerged body can't escape to the surface — it stays
+        // put and erodes via the snuff. In dry air it rises freely as before.
+        if (coolN === 0 && Math.random() < 0.5) {
+            const first = Math.random() < 0.5 ? -1 : 1;
+            if (this.tryRise(x, y, x, y - 1, Mat.FIRE)) return;
+            if (this.tryRise(x, y, x + first, y - 1, Mat.FIRE)) return;
+        }
+    }
+
+    /**
+     * Lightning doesn't move — it just flashes in place and dies fast. While
+     * alive it keeps re-asserting strike heat into its cell so the air-path stays
+     * scorching long enough to ignite/boil/melt what it passes, then vanishes.
+     */
+    private updateLightning(x: number, y: number, i: number): void {
+        // compare BEFORE subtracting: life is a Uint8Array, so decrementing past 0
+        // wraps to ~255 and the bolt cell would flash forever (and never let its
+        // chunk sleep). its short lifespan lands on that boundary almost every time.
+        const dec = 1 + ((Math.random() * 2) | 0);
+        if (this.life[i] <= dec) {
+            this.setCell(x, y, Mat.EMPTY);
+            return;
+        }
+        this.life[i] -= dec;
+        if (this.heat[i] < emitTemp[Mat.LIGHTNING]) this.heat[i] = emitTemp[Mat.LIGHTNING];
+        this.wake(x, y);
+    }
+
+    /** active coolants (cold/wet matter) that can quench lava into a crust. */
+    private isCoolant(m: number): boolean {
+        return m === Mat.WATER || m === Mat.STEAM || m === Mat.ICE;
+    }
+    /** true if any 4-neighbor is an active coolant. */
+    private nearCoolant(x: number, y: number): boolean {
+        return (
+            this.isCoolant(this.matAt(x, y - 1)) ||
+            this.isCoolant(this.matAt(x, y + 1)) ||
+            this.isCoolant(this.matAt(x - 1, y)) ||
+            this.isCoolant(this.matAt(x + 1, y))
+        );
+    }
+
+    /** true if any 4-neighbor is WATER (wets gunpowder, shielding it from ignition). */
+    private nearWater(x: number, y: number): boolean {
+        return (
+            this.matAt(x, y - 1) === Mat.WATER ||
+            this.matAt(x, y + 1) === Mat.WATER ||
+            this.matAt(x - 1, y) === Mat.WATER ||
+            this.matAt(x + 1, y) === Mat.WATER
+        );
+    }
+
+    /** a WET neighbor (water/steam) that drowns a flame. ICE is excluded on
+     * purpose: fire MELTS ice, it does not drown in it — counting ice here snuffs
+     * the very flames meant to thaw an ice block. */
+    private isWet(m: number): boolean {
+        return m === Mat.WATER || m === Mat.STEAM;
+    }
+    /** count of 4-neighbors that are wet (used by the fire snuff + rise gate). */
+    private wetNeighbors(x: number, y: number): number {
+        let n = 0;
+        if (this.isWet(this.matAt(x, y - 1))) n++;
+        if (this.isWet(this.matAt(x, y + 1))) n++;
+        if (this.isWet(this.matAt(x - 1, y))) n++;
+        if (this.isWet(this.matAt(x + 1, y))) n++;
+        return n;
+    }
+
+    private updateLava(x: number, y: number): void {
+        const i = y * this.W + x;
+        const coolantAdjacent = this.nearCoolant(x, y);
+        // Lava solidifies into a stone crust only where it is BOTH cooled below the
+        // quench gate AND touching a coolant (water/steam/ice). The coolant guard is
+        // the key to not crusting in open air: air is a colder sink than water, so a
+        // pure-temperature gate would petrify a thin stream mid-fall. The gate sits
+        // just under the emission temperature (emitTemp - DELTA) because the cooled
+        // solver only craters a water-touching cell ~60°/frame — a deep gate would
+        // never be reached. Checked BEFORE re-emission so it reads the value last
+        // frame's diffusion left behind (re-asserting first would pin it molten).
+        if (coolantAdjacent && this.heat[i] < emitTemp[Mat.LAVA] - LAVA_QUENCH_DELTA) {
+            this.setCell(x, y, Mat.STONE);
+            return;
+        }
+        // Re-assert emission so non-coolant lava stays molten and keeps heating its
+        // surroundings — but SUPPRESS it when coolant-adjacent, so a resting cell
+        // against water can actually accumulate cooling below the gate instead of
+        // being re-pinned to emitTemp every frame (which would oscillate just above
+        // the gate and never crust).
+        if (!coolantAdjacent && this.heat[i] < emitTemp[Mat.LAVA])
+            this.heat[i] = emitTemp[Mat.LAVA];
+        this.wake(x, y); // keep lava pools shimmering / reactive
+
+        // Viscous: only sometimes flow, and only sluggishly sideways.
+        if (Math.random() < 0.6) {
+            if (this.moveLava(x, y, x, y + 1)) return;
+            const first = Math.random() < 0.5 ? -1 : 1;
+            if (this.moveLava(x, y, x + first, y + 1)) return;
+            if (this.moveLava(x, y, x - first, y + 1)) return;
+            if (Math.random() < 0.3) {
+                if (this.moveLava(x, y, x + first, y)) return;
+                if (this.moveLava(x, y, x - first, y)) return;
+            }
+        }
+    }
+
+    /**
+     * Move lava and carry its molten temperature to the destination. Heat is an
+     * Eulerian field (swap leaves it in place), so a cell lava just flowed into
+     * holds the *old* (cold) temperature — without this it would read below
+     * freezePoint next frame and petrify mid-flow. Seeding the destination keeps
+     * a flowing stream liquid; it only crusts once it stops and stays exposed.
+     */
+    private moveLava(x: number, y: number, tx: number, ty: number): boolean {
+        if (!this.tryMove(x, y, tx, ty, Mat.LAVA)) return false;
+        const ti = ty * this.W + tx;
+        // Re-seed the destination molten so a flowing stream stays liquid — but
+        // SUPPRESS it where the destination is coolant-adjacent, mirroring the rest
+        // path, so lava flowing against water can cool toward the crust gate.
+        if (!this.nearCoolant(tx, ty) && this.heat[ti] < emitTemp[Mat.LAVA])
+            this.heat[ti] = emitTemp[Mat.LAVA];
+        this.wake(tx, ty);
+        return true;
+    }
+
+    private updateAcid(x: number, y: number): void {
+        const dirs = [
+            [0, 1],
+            [-1, 0],
+            [1, 0],
+            [0, -1],
+        ];
+        for (const [dx, dy] of dirs) {
+            const nx = x + dx,
+                ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= this.W || ny >= this.H) continue;
+            if (isDissolvable(this.cells[ny * this.W + nx]) && Math.random() < 0.25) {
+                this.setCell(nx, ny, Mat.EMPTY);
+                if (Math.random() < 0.4) {
+                    this.setCell(x, y, Mat.SMOKE);
+                    return;
+                } // acid spent
+                break;
+            }
+        }
+        this.updateLiquid(x, y, Mat.ACID);
+    }
+
+    private growPlant(x: number, y: number): void {
+        if (Math.random() > 0.012) return;
+        const dirs = [
+            [0, -1],
+            [0, 1],
+            [-1, 0],
+            [1, 0],
+        ];
+        for (const [dx, dy] of dirs) {
+            const nx = x + dx,
+                ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= this.W || ny >= this.H) continue;
+            if (this.cells[ny * this.W + nx] === Mat.WATER) {
+                this.setCell(nx, ny, Mat.PLANT);
+                return;
+            }
+        }
+    }
+
+    private updateIce(x: number, y: number): void {
+        const i = y * this.W + x;
+        // Melt -> water. CHECKED BEFORE re-chilling, against last frame's diffused
+        // value (mirrors lava): re-asserting the cold emission first would pin the
+        // cell below meltPoint forever. Ice in ambient (20 < meltPoint 40) self-
+        // cools and stays frozen; a hot neighbor (fire/lava) overwhelms it.
+        // melt probability is high so ice surrounded by fire reliably thaws within
+        // the short window the new (cooling) heat field leaves before the flame
+        // rises away — the lingering heat that used to guarantee it is gone.
+        if (this.heat[i] >= meltPoint[Mat.ICE] && Math.random() < 0.5) {
+            this.setCell(x, y, Mat.WATER);
+            return;
+        }
+        // re-assert the cold emission so ice keeps chilling neighbors via diffusion;
+        // this is what drives the emergent cold freezing of adjacent water.
+        if (this.heat[i] > emitTemp[Mat.ICE]) this.heat[i] = emitTemp[Mat.ICE];
+        this.wake(x, y);
+    }
+
+    private explode(x: number, y: number): void {
+        const R = 5;
+        const R2 = R * R;
+        for (let dy = -R; dy <= R; dy++) {
+            for (let dx = -R; dx <= R; dx++) {
+                if (dx * dx + dy * dy > R2) continue;
+                const nx = x + dx,
+                    ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= this.W || ny >= this.H) continue;
+                if (this.cells[ny * this.W + nx] === Mat.WALL) continue; // walls survive
+                this.setCell(nx, ny, Math.random() < 0.7 ? Mat.FIRE : Mat.EMPTY);
+            }
+        }
+    }
+
+    // ---- pixel buffers -----------------------------------------------------
+
+    /**
+     * Final on-screen color for a cell. Heat enters two ways: a debug heatmap
+     * (blue->red ramp, ignores material) when `showTemp` is set, and otherwise an
+     * always-on subtle warm tint on ordinary matter (fire/lava are already
+     * saturated + animated, so they're left alone).
+     */
+    private colorOf(m: number, lf: number, ex: number, h: number): number {
+        if (this.showTemp) return this.heatColor(h);
+        const c = this.baseColor(m, lf, ex);
+        if (m === Mat.FIRE || m === Mat.LAVA || m === Mat.LIGHTNING) return c;
+        return this.tint(c, h);
+    }
+
+    /** subtle warm shift: hotter pushes red up / blue down, colder the reverse. */
+    private tint(c: number, h: number): number {
+        let d = (h - AMBIENT) * 0.06;
+        if (d < -14) d = -14;
+        else if (d > 14) d = 14;
+        const r = c & 0xff;
+        const g = (c >> 8) & 0xff;
+        const b = (c >> 16) & 0xff;
+        return rgba(clamp(r + d), g, clamp(b - d));
+    }
+
+    /** debug heatmap ramp: cold -> blue, ambient -> white-ish, hot -> red. */
+    private heatColor(h: number): number {
+        const t = h < -60 ? 0 : h > 600 ? 1 : (h + 60) / 660;
+        const r = clamp(255 * Math.min(1, t * 2));
+        const b = clamp(255 * Math.min(1, (1 - t) * 2));
+        const g = clamp(255 * (1 - Math.abs(t - 0.5) * 2));
+        return rgba(r, g, b);
+    }
+
+    private baseColor(m: number, lf: number, ex: number): number {
+        switch (m) {
+            case Mat.WALL:
+                return shade(120, 122, 130, (ex % 16) - 8);
+            case Mat.SAND:
+                return shade(196, 180, 120, (ex % 40) - 14);
+            case Mat.WATER:
+                return shade(48, 104, 200, (ex % 18) - 8);
+            case Mat.STONE:
+                return shade(94, 94, 102, (ex % 28) - 14);
+            case Mat.WOOD:
+                return shade(112, 74, 42, (ex % 32) - 14);
+            case Mat.OIL:
+                return shade(60, 52, 38, (ex % 16) - 8);
+            case Mat.ACID:
+                return shade(120, 214, 70, (ex % 34) - 14);
+            case Mat.PLANT:
+                return shade(46, 156, 58, (ex % 54) - 22);
+            case Mat.ICE:
+                return shade(168, 208, 234, (ex % 20) - 10);
+            case Mat.GLASS:
+                // pale blue-green with a faint sheen; low grain so it reads as smooth.
+                return shade(200, 225, 235, (ex % 16) - 8);
+            case Mat.GUNPOWDER:
+                return shade(64, 62, 70, (ex % 28) - 14);
+            case Mat.METAL:
+                // brushed-steel sheen: a few cells catch a bright highlight band.
+                return shade(150, 152, 164, (ex % 48 > 40 ? 22 : 0) + (ex % 18) - 9);
+            case Mat.FILINGS:
+                // iron grit: darker than steel, high grain so the powder glitters.
+                return shade(104, 106, 116, (ex % 46) - 20);
+            case Mat.FIRE: {
+                const t = lf > 120 ? 1 : lf / 120;
+                const f = ((ex + this.frame * 3) % 36) - 16; // animated flicker
+                return rgba(
+                    clamp(255 + (f >> 1)),
+                    clamp(70 + ((160 * t) | 0) + f),
+                    clamp((40 * t * t) | 0)
+                );
+            }
+            case Mat.LAVA: {
+                const f = ((ex + this.frame * 2) % 44) - 18;
+                return shade(255, 110, 30, f);
+            }
+            case Mat.LIGHTNING: {
+                // hot near-white core with a blue cast; fast per-cell flicker keeps the
+                // bolt alive-looking across its few render frames. brighter while young.
+                const t = lf > 6 ? 1 : lf / 6;
+                const f = ((ex + this.frame * 5) % 40) - 18;
+                return rgba(clamp(180 + ((40 * t) | 0) + f), clamp(200 + ((30 * t) | 0) + f), 255);
+            }
+            case Mat.SMOKE: {
+                const t = lf / 180;
+                const g = 50 + ((40 * t) | 0);
+                return blendBg(g, g, g + 4, Math.max(0.15, t));
+            }
+            case Mat.STEAM: {
+                const t = lf / 250;
+                return blendBg(205, 210, 220, Math.max(0.35, t));
+            }
+        }
+        return rgba(255, 0, 255); // should never happen — magenta = bug
+    }
+
+    /**
+     * Fill the core-owned pixel buffers from the current grid: `buf32` gets the
+     * full scene color per cell (background for EMPTY), and `glow32` gets only the
+     * emissive (fire/lava/lightning) cells, black elsewhere, for the bloom/light
+     * passes. Also refreshes `count` (non-empty cells) and `emissive`. Downstream
+     * consumers (Pixi texture, canvas renderer) call this, then read the buffers.
+     */
+    writeImage(): void {
+        const { W, H, cells, life, extra, heat, buf32, glow32 } = this;
+        const n = W * H;
+        let count = 0;
+        let emissive = 0;
+        for (let i = 0; i < n; i++) {
+            const m = cells[i];
+            if (m === Mat.EMPTY) {
+                // in heatmap mode even empty space shows its temperature.
+                buf32[i] = this.showTemp ? this.heatColor(heat[i]) : BG;
+                glow32[i] = 0;
+                continue;
+            }
+            count++;
+            const c = this.colorOf(m, life[i], extra[i], heat[i]);
+            buf32[i] = c;
+            if (m === Mat.FIRE || m === Mat.LAVA || m === Mat.LIGHTNING) {
+                glow32[i] = c;
+                emissive++;
+            } else {
+                glow32[i] = 0;
+            }
+        }
+        this.count = count;
+        this.emissive = emissive;
+    }
+}
