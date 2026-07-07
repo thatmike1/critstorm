@@ -1,5 +1,11 @@
 import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import { formatNumber } from "./format";
+import { Simulation } from "../sim/simulation";
+import { SimLayer, paintDemoScene } from "./sim-layer";
+
+/** sim grid resolution (design §7: ~320×180, nearest-neighbor upscaled to fill). */
+const SIM_W = 320;
+const SIM_H = 180;
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
 const TIER_COLORS = [
@@ -45,6 +51,8 @@ const POOL_SIZE = 600;
  */
 export class CritEngine {
     private app: Application;
+    private sim: Simulation;
+    private simLayer: SimLayer;
     private stage: Container;
     private flash: Graphics;
     private flashAlpha = 0;
@@ -56,6 +64,17 @@ export class CritEngine {
 
     private constructor(app: Application) {
         this.app = app;
+
+        // BOTTOM LAYER: the falling-sand sim, added first so every crit number,
+        // effect, and flash draws on top of it (design §7). It lives on app.stage
+        // (not this.stage) so screen shake never jitters the world underneath.
+        this.sim = new Simulation(SIM_W, SIM_H);
+        // DEMO BOOTSTRAP — temporary scene, replaced by world bootstrap (b4r.3).
+        paintDemoScene(this.sim);
+        this.simLayer = new SimLayer(this.sim);
+        this.simLayer.resize(app.screen.width, app.screen.height);
+        app.stage.addChild(this.simLayer.sprite);
+
         this.stage = new Container();
         app.stage.addChild(this.stage);
         this.flash = new Graphics();
@@ -236,6 +255,10 @@ export class CritEngine {
 
     private update(dtMs: number): void {
         const dt = dtMs / 1000;
+        // advance + re-upload the sim before the overlay so the world sits behind
+        // this frame's crit numbers; keep it stretched to the (possibly resized) stage.
+        this.simLayer.update();
+        this.simLayer.resize(this.app.screen.width, this.app.screen.height);
         for (let i = this.active.length - 1; i >= 0; i--) {
             const c = this.active[i];
             c.life += dtMs;
@@ -285,5 +308,8 @@ export class CritEngine {
 
     destroy(): void {
         this.app.destroy(true, { children: true });
+        // app.destroy(children) tears down the sprite but leaves textures alone;
+        // release the sim's reused texture + buffer source explicitly.
+        this.simLayer.destroy();
     }
 }
