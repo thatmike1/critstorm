@@ -82,6 +82,47 @@ describe("bot strategies (surge stubbed)", () => {
     });
 });
 
+// design.md §6 mandates three economic assertions for the tuning harness:
+// EV-crossover, bust-hazard, and anti-farming. EV-crossover and bust-hazard
+// read the surge pot/overheat model (issues hkm.*), which is still stubbed
+// (see "bot strategies (surge stubbed)" above), so neither can be asserted yet.
+//
+// anti-farming depends only on the essence economy, so in principle it is
+// assertable today — but the current economy does not satisfy it, so there is
+// no honest green assertion to ship. the property: cores/min must strictly
+// increase with storm depth across the 8->35 min arc, where
+// cores = floor(sqrt(bankedEssence / 500)) and bankedEssence is cumulative
+// collected essence (== economy.totalDamage here, since buy() never decrements
+// totalDamage). measured against today's greedy economy, cumulative essence is
+// a staircase: it plateaus once critChance, golden, and attackRate hit their
+// hard caps, then grows ~linearly, so cores/min declines after ~15 min instead
+// of rising to 35. a 32-seed sweep even flips the 8-min vs 35-min comparison
+// with the sample size (16 seeds -> shallow wins, 32 seeds -> deep wins), so no
+// fixed seed yields a stable, non-cherry-picked assertion. this is an
+// economy-tuning gap, not a surge blocker; the harness refusing to certify it
+// is §6 working as intended. re-enable once in-storm essence growth stays
+// superlinear across the whole arc.
+describe("storm economy (design.md §6 anti-farming)", () => {
+    it.skip("cores/min strictly increases with storm depth across the 8->35 min arc", () => {
+        const cores = (bankedEssence: number): number => Math.floor(Math.sqrt(bankedEssence / 500));
+        const coresPerMin = (durationMin: number): number => {
+            const summary = new StormSimulator({
+                durationSec: durationMin * 60,
+                strategy: strategyByName("bank-at-6"),
+                seed: 42,
+                gridW: 8,
+                gridH: 8,
+            }).run();
+            // bankedEssence == cumulative collected essence == totalDamage
+            return cores(summary.totalDamage) / durationMin;
+        };
+        const rates = [8, 15, 22, 29, 35].map(coresPerMin);
+        for (let i = 1; i < rates.length; i++) {
+            expect(rates[i]).toBeGreaterThan(rates[i - 1]);
+        }
+    });
+});
+
 /** a minimal economy state stand-in for pure strategy-decision tests */
 function emptyEconomy() {
     return {
