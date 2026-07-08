@@ -1,6 +1,19 @@
 import { BufferImageSource, Sprite, Texture } from "pixi.js";
-import { Mat } from "../sim/materials";
 import type { Simulation } from "../sim/simulation";
+
+/**
+ * fixed sim timestep in seconds (20 Hz). must match the headless storm harness
+ * (`sim/storm-simulator.ts` DEFAULT_STEP_SEC) so on-screen physics advances at the
+ * same rate the economy was tuned against; a consistency test pins the two.
+ */
+export const SIM_STEP_SEC = 0.05;
+
+/**
+ * cap on sim steps advanced per rendered frame. after a stall (a backgrounded tab,
+ * a GC pause) the accumulated delta can be huge; without a cap we would try to
+ * catch up in one frame and spiral (each catch-up frame falls further behind).
+ */
+export const MAX_SIM_STEPS_PER_FRAME = 5;
 
 /**
  * reinterpret the sim's packed-RGBA `Uint32` scene buffer as the byte view a GPU
@@ -14,20 +27,28 @@ export function bytesOf(buf32: Uint32Array<ArrayBuffer>): Uint8Array {
 }
 
 /**
- * DEMO BOOTSTRAP — TEMPORARY. paints a small sand pile + water pocket so the sim
- * layer is visibly alive the instant the stage mounts. nothing here is
- * load-bearing; REPLACE wholesale with the real world bootstrap (critstorm-b4r.3).
+ * drain a real-time delta into a whole number of fixed sim steps. `accumulatorSec`
+ * carries the sub-step remainder across frames so the sim advances at a steady
+ * {@link SIM_STEP_SEC} rate regardless of frame cadence. steps are capped at
+ * `maxSteps`; when the cap is hit the leftover backlog is dropped (returned
+ * accumulator resets toward 0) so a stall cannot snowball into a catch-up spiral.
+ * pure and side-effect free so the timestep logic is unit-testable without a GPU.
  */
-export function paintDemoScene(sim: Simulation): void {
-    const { W, H } = sim;
-    // a mound of sand resting on the floor (the lower half of the circle is
-    // clipped away, leaving a dome that reads as a pile).
-    sim.paint((W * 0.5) | 0, H - 2, 22, Mat.SAND);
-    // a water pocket up and to the left that falls, spreads, and pools against
-    // the sand — instant motion so the layer never looks static.
-    sim.paint((W * 0.26) | 0, (H * 0.32) | 0, 12, Mat.WATER);
-    // a second sand blob raining from the top-right for extra visible churn.
-    sim.paint((W * 0.72) | 0, (H * 0.18) | 0, 9, Mat.SAND);
+export function drainFixedSteps(
+    accumulatorSec: number,
+    elapsedMs: number,
+    stepSec: number,
+    maxSteps: number
+): { steps: number; accumulatorSec: number } {
+    let acc = accumulatorSec + elapsedMs / 1000;
+    let steps = 0;
+    while (acc >= stepSec && steps < maxSteps) {
+        acc -= stepSec;
+        steps++;
+    }
+    // hit the cap with time to spare: discard the backlog instead of banking debt.
+    if (acc > stepSec) acc = 0;
+    return { steps, accumulatorSec: acc };
 }
 
 /**
@@ -43,9 +64,14 @@ export class SimLayer {
     readonly sprite: Sprite;
     private readonly source: BufferImageSource;
     private readonly texture: Texture;
+    /** unspent real-time carried between frames, drained in fixed sim steps. */
+    private accumulatorSec = 0;
 
     constructor(sim: Simulation) {
         this.sim = sim;
+        // pack the initial grid (e.g. the bootstrapped terrain floor) into buf32
+        // so the very first uploaded frame shows the world even before any step.
+        sim.writeImage();
         // one texture over the sim's own buffer bytes; `format` is forced because
         // BufferImageSource would otherwise infer `bgra8unorm` from a Uint8Array
         // and swap the red/blue channels of every cell.
@@ -67,12 +93,28 @@ export class SimLayer {
     }
 
     /**
-     * advance the sim one frame and re-upload its pixel buffer into the texture.
-     * order matters: step mutates the grid, writeImage() packs it into `buf32`
-     * (which the texture bytes alias), then source.update() flags the GPU upload.
+     * advance the sim on a fixed 20 Hz timestep and re-upload its pixel buffer.
+     * `elapsedMs` (the pixi ticker's real-time frame delta) is accumulated and
+     * drained in fixed {@link SIM_STEP_SEC} increments, so the sim runs at a
+     * deterministic rate independent of display refresh — a 144 Hz and a 60 Hz
+     * monitor step it the same number of times per real second, keeping it in
+     * lockstep with the dtMs-based crit-number overlay instead of drifting.
+     * steps per frame are capped ({@link MAX_SIM_STEPS_PER_FRAME}) to avoid a
+     * spiral-of-death after a stall. order within a step matters: step mutates the
+     * grid, writeImage() packs it into `buf32` (which the texture bytes alias),
+     * then source.update() flags the GPU upload — skipped entirely on frames that
+     * advance no steps, since the buffer is unchanged.
      */
-    update(): void {
-        this.sim.step();
+    update(elapsedMs: number): void {
+        const { steps, accumulatorSec } = drainFixedSteps(
+            this.accumulatorSec,
+            elapsedMs,
+            SIM_STEP_SEC,
+            MAX_SIM_STEPS_PER_FRAME
+        );
+        this.accumulatorSec = accumulatorSec;
+        if (steps === 0) return;
+        this.sim.step(steps);
         this.sim.writeImage();
         this.source.update();
     }
