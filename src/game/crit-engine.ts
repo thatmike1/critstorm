@@ -1,11 +1,7 @@
 import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import { formatNumber } from "./format";
-import { Simulation } from "../sim/simulation";
-import { SimLayer, paintDemoScene } from "./sim-layer";
-
-/** sim grid resolution (design §7: ~320×180, nearest-neighbor upscaled to fill). */
-const SIM_W = 320;
-const SIM_H = 180;
+import { createWorld, type World } from "./world";
+import { SimLayer } from "./sim-layer";
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
 const TIER_COLORS = [
@@ -51,7 +47,7 @@ const POOL_SIZE = 600;
  */
 export class CritEngine {
     private app: Application;
-    private sim: Simulation;
+    private world: World;
     private simLayer: SimLayer;
     private stage: Container;
     private flash: Graphics;
@@ -65,13 +61,13 @@ export class CritEngine {
     private constructor(app: Application) {
         this.app = app;
 
-        // BOTTOM LAYER: the falling-sand sim, added first so every crit number,
-        // effect, and flash draws on top of it (design §7). It lives on app.stage
-        // (not this.stage) so screen shake never jitters the world underneath.
-        this.sim = new Simulation(SIM_W, SIM_H);
-        // DEMO BOOTSTRAP — temporary scene, replaced by world bootstrap (b4r.3).
-        paintDemoScene(this.sim);
-        this.simLayer = new SimLayer(this.sim);
+        // BOTTOM LAYER: the bootstrapped storm world (terrain floor + storm core),
+        // added first so every crit number, effect, and flash draws on top of it
+        // (design §7). It lives on app.stage (not this.stage) so screen shake never
+        // jitters the world underneath. the core + strike zone are held on `world`
+        // for the eruption spawner (wave 3).
+        this.world = createWorld();
+        this.simLayer = new SimLayer(this.world.sim);
         this.simLayer.resize(app.screen.width, app.screen.height);
         app.stage.addChild(this.simLayer.sprite);
 
@@ -256,8 +252,9 @@ export class CritEngine {
     private update(dtMs: number): void {
         const dt = dtMs / 1000;
         // advance + re-upload the sim before the overlay so the world sits behind
-        // this frame's crit numbers; keep it stretched to the (possibly resized) stage.
-        this.simLayer.update();
+        // this frame's crit numbers; the fixed-timestep accumulator inside decouples
+        // sim speed from display refresh. keep it stretched to the (resized) stage.
+        this.simLayer.update(dtMs);
         this.simLayer.resize(this.app.screen.width, this.app.screen.height);
         for (let i = this.active.length - 1; i >= 0; i--) {
             const c = this.active[i];

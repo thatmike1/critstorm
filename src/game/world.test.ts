@@ -105,6 +105,18 @@ describe("createWorld — storm core", () => {
         expect(core.y).toBeGreaterThanOrEqual(0);
         expect(core.y).toBeLessThan(sim.H);
     });
+
+    it("clamps the core in-bounds for a large coreAboveFloor (never negative)", () => {
+        // a coreAboveFloor taller than the whole grid would push coreY negative
+        // and cause an out-of-range sim.cells read; the clamp must hold the core
+        // at row 0 while keeping it strictly in open air above the floor.
+        const { sim, core, floorHeightAt } = createWorld({ seed: 4, coreAboveFloor: 500 });
+        expect(core.y).toBeGreaterThanOrEqual(0);
+        expect(core.y).toBeLessThan(sim.H);
+        // still above the floor surface, so the core cell is open air.
+        expect(core.y).toBeLessThan(floorHeightAt(core.x));
+        expect(sim.cells[core.y * sim.W + core.x]).toBe(Mat.EMPTY);
+    });
 });
 
 describe("createWorld — strike zone", () => {

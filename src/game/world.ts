@@ -159,9 +159,14 @@ export function createWorld(opts: WorldOptions = {}): World {
     paintFloor(sim, surface, sandCap);
 
     // core: horizontally centred, sitting `coreAboveFloor` cells above the floor
-    // surface at its own column — guaranteed open air above the terrain.
+    // surface at its own column — guaranteed open air above the terrain. clamp
+    // into the grid: never above row 0, and always at least one cell above the
+    // surface so it stays in open air. without this a large `coreAboveFloor` (or
+    // a shallow floor) drives coreY negative, breaking the in-bounds invariant
+    // and producing an out-of-range `sim.cells` read.
     const coreX = width >> 1;
-    const coreY = surface[coreX] - coreAboveFloor;
+    const surfaceAtCore = surface[coreX];
+    const coreY = Math.max(0, Math.min(surfaceAtCore - coreAboveFloor, surfaceAtCore - 1));
     const core: Vec2 = { x: coreX, y: coreY };
 
     const r2 = strikeRadius * strikeRadius;
