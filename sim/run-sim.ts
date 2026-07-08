@@ -45,18 +45,28 @@ function parseArgs(argv: string[]): CliArgs {
                 args.mode = value;
                 i++;
                 break;
-            case "--duration":
-                args.durationMin = Number(value);
+            case "--duration": {
+                const duration = Number(value);
+                if (!Number.isFinite(duration) || duration <= 0) {
+                    throw new Error(`--duration must be a positive number, got ${value}`);
+                }
+                args.durationMin = duration;
                 i++;
                 break;
+            }
             case "--strategy":
                 args.strategy = value;
                 i++;
                 break;
-            case "--seed":
-                args.seed = Number(value);
+            case "--seed": {
+                const seed = Number(value);
+                if (!Number.isFinite(seed)) {
+                    throw new Error(`--seed must be a number, got ${value}`);
+                }
+                args.seed = seed;
                 i++;
                 break;
+            }
             default:
                 throw new Error(`unknown argument: ${flag}`);
         }
