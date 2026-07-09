@@ -11,3 +11,5 @@
 {"id":"int-f02dbc0b","kind":"field_change","created_at":"2026-07-08T17:52:01.097642703Z","actor":"michal.psencik","issue_id":"critstorm-18q","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"merged PR #4"}}
 {"id":"int-a56a93f0","kind":"field_change","created_at":"2026-07-08T17:52:01.275348891Z","actor":"michal.psencik","issue_id":"critstorm-jhg","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"merged PR #4"}}
 {"id":"int-5cce3693","kind":"field_change","created_at":"2026-07-08T17:52:01.725194446Z","actor":"michal.psencik","issue_id":"critstorm-5nf","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"merged PR #5"}}
+{"id":"int-003529de","kind":"field_change","created_at":"2026-07-09T19:31:04.67147528Z","actor":"michal.psencik","issue_id":"critstorm-mhz.1","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"merged PR #6"}}
+{"id":"int-0ef593a6","kind":"field_change","created_at":"2026-07-09T19:31:04.893788177Z","actor":"michal.psencik","issue_id":"critstorm-mhz.2","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"merged PR #6"}}
