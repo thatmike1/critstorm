@@ -3,6 +3,7 @@ import { formatNumber } from "./format";
 import { createWorld, type World } from "./world";
 import { SimLayer } from "./sim-layer";
 import type { Simulation } from "../sim/simulation";
+import { depositEruption } from "./eruption";
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
 const TIER_COLORS = [
@@ -40,7 +41,39 @@ interface FallingBonus {
     elapsed: number;
 }
 
+/**
+ * a gold eruption in its FLIGHT phase. the sim has no velocity (design §7), so the
+ * arc from the storm core to the impact cell is a pure Pixi projectile: position is
+ * a straight lerp in screen space plus a parabolic lift, landing exactly on the
+ * target at u=1. on landing the payload converts to MOLTEN_GOLD grid cells via the
+ * value field. screen-space endpoints are captured at launch; `gx/gy` is the
+ * resolved impact grid cell the payout deposits into.
+ */
+interface Eruption {
+    gfx: Graphics;
+    sx: number;
+    sy: number;
+    ex: number;
+    ey: number;
+    /** peak parabolic lift in screen px (how high the arc bows). */
+    arc: number;
+    /** elapsed flight time in ms. */
+    t: number;
+    /** total flight time in ms. */
+    dur: number;
+    /** impact grid cell (already clamped in-bounds and rounded). */
+    gx: number;
+    gy: number;
+    payout: number;
+    tier: number;
+}
+
 const POOL_SIZE = 600;
+
+/** clamp `v` into the inclusive integer range [lo, hi]. */
+function clampInt(v: number, lo: number, hi: number): number {
+    return v < lo ? lo : v > hi ? hi : v;
+}
 
 /**
  * renders the crit-number blizzard on a full-window pixi stage;
@@ -51,11 +84,13 @@ export class CritEngine {
     private world: World;
     private simLayer: SimLayer;
     private stage: Container;
+    private eruptLayer: Container;
     private flash: Graphics;
     private flashAlpha = 0;
     private pool: Text[] = [];
     private active: FloatingCrit[] = [];
     private bonuses: FallingBonus[] = [];
+    private eruptions: Eruption[] = [];
     private shakeTime = 0;
     private shakeStrength = 0;
 
@@ -71,6 +106,12 @@ export class CritEngine {
         this.simLayer = new SimLayer(this.world.sim);
         this.simLayer.resize(app.screen.width, app.screen.height);
         app.stage.addChild(this.simLayer.sprite);
+
+        // eruption projectiles ride above the world but below the crit numbers +
+        // flash. it lives on app.stage (not this.stage) so screen shake never
+        // jitters the arcs relative to the world they land in.
+        this.eruptLayer = new Container();
+        app.stage.addChild(this.eruptLayer);
 
         this.stage = new Container();
         app.stage.addChild(this.stage);
@@ -134,6 +175,70 @@ export class CritEngine {
         if (tier >= 4) this.shake(Math.min(2 + (tier - 4) * 3, 14));
         if (tier >= 6 || golden)
             this.flashScreen(golden ? 0xffe066 : 0xff2e5e, golden ? 0.12 : 0.2);
+    }
+
+    /**
+     * launch a gold eruption of `payout` toward `target` (screen px; the cursor for
+     * a manual strike). the sim has no velocity (design §7), so flight is a Pixi
+     * ballistic arc from the storm core to the impact cell, tier-widening the
+     * landing spread; on impact the payload converts to MOLTEN_GOLD grid cells that
+     * carry the payout through the value field (design §6 / §4.1). without a target
+     * it aims at a uniform-random point in the strike zone (auto-striker fire).
+     * `payout <= 0` is a no-op.
+     */
+    erupt(payout: number, tier: number, target?: { x: number; y: number }): void {
+        if (!(payout > 0)) return;
+        const { W, H } = this.world.sim;
+        const sw = this.app.screen.width;
+        const sh = this.app.screen.height;
+        const zone = this.world.strikeZone;
+
+        // resolve the aim point in grid coords: the cursor if given, else a
+        // uniform-random point inside the strike disc (sqrt keeps it area-uniform).
+        let gx: number;
+        let gy: number;
+        if (target) {
+            gx = (target.x / sw) * W;
+            gy = (target.y / sh) * H;
+        } else {
+            const a = Math.random() * Math.PI * 2;
+            const r = Math.sqrt(Math.random()) * zone.radius;
+            gx = zone.x + Math.cos(a) * r;
+            gy = zone.y + Math.sin(a) * r;
+        }
+        // tier-scaled spread: higher tiers spray gold wider around the aim point.
+        const spread = 1 + tier * 1.5;
+        gx += (Math.random() - 0.5) * 2 * spread;
+        gy += (Math.random() - 0.5) * 2 * spread;
+        const gxi = clampInt(Math.round(gx), 0, W - 1);
+        const gyi = clampInt(Math.round(gy), 0, H - 1);
+
+        // screen-space flight endpoints (grid -> stretched sprite scale).
+        const sx = (this.world.core.x / W) * sw;
+        const sy = (this.world.core.y / H) * sh;
+        const ex = (gxi / W) * sw;
+        const ey = (gyi / H) * sh;
+        const dist = Math.hypot(ex - sx, ey - sy);
+
+        const gfx = new Graphics();
+        const color = TIER_COLORS[Math.min(tier, TIER_COLORS.length - 1)];
+        gfx.circle(0, 0, 3 + Math.min(tier, 6)).fill(color);
+        gfx.position.set(sx, sy);
+        this.eruptLayer.addChild(gfx);
+        this.eruptions.push({
+            gfx,
+            sx,
+            sy,
+            ex,
+            ey,
+            arc: Math.max(40, dist * 0.4),
+            t: 0,
+            dur: 240 + dist * 0.6,
+            gx: gxi,
+            gy: gyi,
+            payout,
+            tier,
+        });
     }
 
     /**
@@ -260,8 +365,38 @@ export class CritEngine {
         this.shakeStrength = Math.max(this.shakeStrength, strength);
     }
 
+    /**
+     * step every in-flight eruption along its parabolic arc. `u` runs 0→1 over the
+     * flight; position is the straight core→impact lerp plus an upward sine lift that
+     * returns to 0 at the target, so the projectile lands exactly on its impact cell.
+     * on landing the payload is deposited as MOLTEN_GOLD (value-carrying) and the
+     * projectile is torn down.
+     */
+    private advanceEruptions(dtMs: number): void {
+        for (let i = this.eruptions.length - 1; i >= 0; i--) {
+            const e = this.eruptions[i];
+            e.t += dtMs;
+            const u = Math.min(e.t / e.dur, 1);
+            const x = e.sx + (e.ex - e.sx) * u;
+            const lift = e.arc * Math.sin(Math.PI * u); // screen y grows downward
+            e.gfx.position.set(x, e.sy + (e.ey - e.sy) * u - lift);
+            e.gfx.scale.set(1 - u * 0.3);
+            if (u < 1) continue;
+            depositEruption(this.world.sim, e.gx, e.gy, e.payout);
+            this.eruptLayer.removeChild(e.gfx);
+            e.gfx.destroy();
+            this.eruptions.splice(i, 1);
+            this.flashScreen(0xffb02e, e.tier >= 6 ? 0.12 : 0.05);
+            if (e.tier >= 4) this.shake(Math.min(2 + (e.tier - 4) * 2, 10));
+        }
+    }
+
     private update(dtMs: number): void {
         const dt = dtMs / 1000;
+        // advance eruption arcs BEFORE stepping the sim so a projectile that lands
+        // this frame deposits its molten gold in time to be stepped + re-uploaded
+        // by the same simLayer.update() below (design §7 ballistic-flight phase).
+        this.advanceEruptions(dtMs);
         // advance + re-upload the sim before the overlay so the world sits behind
         // this frame's crit numbers; the fixed-timestep accumulator inside decouples
         // sim speed from display refresh. keep it stretched to the (resized) stage.

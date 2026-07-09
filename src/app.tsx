@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { CritEngine } from "./game/crit-engine";
 import { AudioEngine } from "./game/audio";
 import {
@@ -25,7 +25,6 @@ import {
 } from "./game/economy";
 import { formatNumber } from "./game/format";
 import { Collector, defaultCollectorRegion } from "./game/collector";
-import { erupt } from "./game/eruption";
 
 /** clicking heat: each manual click adds this much (0-100 scale) */
 const HEAT_PER_CLICK = 7;
@@ -133,6 +132,9 @@ export function App() {
                 audioRef.current.frenzy();
             } else {
                 const payout = Math.max(expectedDps(s) * 30, 100);
+                // the jackpot is a direct instant grant (design §4.3 bonus), so it
+                // does NOT erupt collectable gold — erupting it would double-credit
+                // once the collector drained that gold back into essence.
                 s.essence += payout;
                 s.totalDamage += payout;
                 engine?.spawn(payout, 5, true);
@@ -164,8 +166,9 @@ export function App() {
                 for (const r of results) {
                     // erupt this hit's gold into the world; it falls, cools, and
                     // settles into the collector band, which mints the essence.
-                    erupt(e.storm, r.damage);
                     engine!.spawn(r.damage, r.tier, r.golden);
+                    // auto-strikes have no cursor: erupt at a random strike-zone point.
+                    engine!.erupt(r.damage, r.tier);
                     audioRef.current.attack(r.tier);
                     if (r.golden) audioRef.current.golden();
                 }
@@ -197,10 +200,13 @@ export function App() {
         };
     }, []);
 
-    const manualAttack = () => {
+    const manualAttack = (e: ReactPointerEvent<HTMLDivElement>) => {
         audioRef.current.unlock();
         const s = stateRef.current;
         clickTimesRef.current.push(performance.now());
+        // aim the eruption at the click position, in host-local (canvas) px.
+        const rect = hostRef.current?.getBoundingClientRect();
+        const target = rect ? { x: e.clientX - rect.left, y: e.clientY - rect.top } : undefined;
         if (!frenzyActive(s)) {
             heatRef.current += HEAT_PER_CLICK;
             if (heatRef.current >= 100) {
@@ -211,11 +217,12 @@ export function App() {
         }
         const r = rollAttack(s, Math.random);
         applyAttack(s, r);
-        const engine = engineRef.current;
         // a manual hit erupts gold too, so clicking feeds the collector like the
-        // auto-loop does — essence flows only through the drain, never here.
-        if (engine) erupt(engine.storm, r.damage);
-        engine?.spawn(r.damage, r.tier, r.golden);
+        // auto-loop does — essence flows only through the drain, never here. the
+        // ballistic eruption arcs from the core to the click (target) and deposits
+        // molten gold that falls, cools, and settles into the collector band.
+        engineRef.current?.spawn(r.damage, r.tier, r.golden);
+        engineRef.current?.erupt(r.damage, r.tier, target);
         audioRef.current.attack(Math.max(r.tier, 1));
         if (r.golden) audioRef.current.golden();
     };
