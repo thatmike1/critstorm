@@ -24,10 +24,15 @@ export const Mat = {
     // property tables stay densely indexed, but it's intercepted before any paint.
     MAGNET: 18,
     GLASS: 19, // formed when sand melts under sustained lava heat
+    // gold matter loop: GOLD is the dense powder payload carrier, MOLTEN_GOLD its
+    // hot liquid phase. both carry a per-cell `value` (see Simulation.value) that
+    // survives the melt/freeze round-trip.
+    GOLD: 20,
+    MOLTEN_GOLD: 21,
 } as const;
 
 export type MatId = number;
-export const MAT_COUNT = 20;
+export const MAT_COUNT = 22;
 
 // Density drives displacement: a denser mover sinks through / swaps with a
 // lighter *movable* cell. Static solids (wall, stone, wood, plant, ice) are
@@ -43,6 +48,12 @@ density[Mat.FILINGS] = 70; // iron — heavier than sand, sinks through water
 density[Mat.FIRE] = 1;
 density[Mat.SMOKE] = 1;
 density[Mat.STEAM] = 1;
+// MOLTEN_GOLD must out-sink water (30) so an erupted stream drops through a pool
+// instead of floating, yet stay under LAVA (90) so it never displaces lava — the
+// lava-contact path consumes it instead of swapping. GOLD is a dense powder that
+// likewise sinks through water; heavier than sand (60) so it settles beneath it.
+density[Mat.MOLTEN_GOLD] = 45;
+density[Mat.GOLD] = 75;
 
 // Per-material thermal conductivity (0 = perfect insulator, 1 = conducts like
 // air). Drives the harmonic-mean face flow in Simulation.diffuse(): heat through
@@ -68,6 +79,11 @@ CONDUCT[Mat.OIL] = 0.6;
 CONDUCT[Mat.ACID] = 0.6;
 CONDUCT[Mat.METAL] = 0.9;
 CONDUCT[Mat.FILINGS] = 0.9;
+// gold is a metal: it conducts hard in both phases, so a molten pool bleeds heat
+// to the solid gold beneath it (helping it re-melt) and a cast ingot carries a
+// flame's heat through its body.
+CONDUCT[Mat.GOLD] = 0.9;
+CONDUCT[Mat.MOLTEN_GOLD] = 0.9;
 // EMPTY / SMOKE / STEAM / LIGHTNING keep the 1.0 default.
 
 // ---- thermal threshold tables -------------------------------------------
@@ -97,6 +113,11 @@ emitTemp[Mat.ICE] = -100;
 // instantly via the heat field. Re-asserted each frame of its short life so the
 // heat lingers long enough for the probabilistic ignitions to fire.
 emitTemp[Mat.LIGHTNING] = 1400;
+// MOLTEN_GOLD spawns hot: freshly erupted or freshly melted gold seeds this so it
+// reads well above its own freeze gate (150) and won't petrify on the first frame
+// before it has flowed. sits above GOLD's melt point (300) so a just-formed pool
+// stays liquid until diffusion cools it. (eruption may override with a tier temp.)
+emitTemp[Mat.MOLTEN_GOLD] = 400;
 
 // flammables -> FIRE when heat >= this. All sit under FIRE's 315 single-contact
 // ceiling so a lone flame still spreads; ordered so wood is the most stubborn.
@@ -114,6 +135,10 @@ meltPoint[Mat.ICE] = 40;
 // 300 gate may never form glass — 220 forms it under a real pool while leaving a
 // lone hot speck inert. (Gated by the glass test in the tuning loop.)
 meltPoint[Mat.SAND] = 220;
+// GOLD -> MOLTEN_GOLD. sits above every flammable's ignition point so gold only
+// liquefies under real molten heat (lava contact, sustained fire), not a passing
+// spark. the melt carries the cell's value across (see Simulation.setCell).
+meltPoint[Mat.GOLD] = 300;
 
 // liquid -> gas when heat >= this.
 export const boilPoint = new Float32Array(MAT_COUNT);
@@ -129,11 +154,27 @@ freezePoint[Mat.WATER] = 0; // -> ICE
 // -> WATER (condense). Sub-ambient so steam in plain 20° air never reaches it
 // and dissipates by lifespan instead of mass-condensing back to rain.
 freezePoint[Mat.STEAM] = 12;
+// MOLTEN_GOLD -> GOLD once it cools below this. above ambient (20) so a still pool
+// reliably solidifies at rest, and well under its 400 spawn temperature so a fresh
+// stream stays molten while flowing. the freeze carries value back into the solid.
+freezePoint[Mat.MOLTEN_GOLD] = 150;
 
 // A "movable" cell can be displaced by density swaps (liquids + gases + fire).
 // Powders are intentionally NOT movable-by-others, so water rests on sand etc.
 const movable = new Uint8Array(MAT_COUNT);
-for (const m of [Mat.WATER, Mat.OIL, Mat.ACID, Mat.LAVA, Mat.SMOKE, Mat.STEAM, Mat.FIRE])
+// MOLTEN_GOLD is a liquid, so it displaces / is displaced like the other liquids;
+// GOLD stays OUT (like SAND/FILINGS) so a powder pile rests instead of being
+// shoved around by denser liquids flowing past.
+for (const m of [
+    Mat.WATER,
+    Mat.OIL,
+    Mat.ACID,
+    Mat.LAVA,
+    Mat.SMOKE,
+    Mat.STEAM,
+    Mat.FIRE,
+    Mat.MOLTEN_GOLD,
+])
     movable[m] = 1;
 export function isMovable(m: number): boolean {
     return movable[m] === 1;
@@ -151,6 +192,9 @@ for (const m of [
     Mat.METAL,
     Mat.FILINGS,
     Mat.GLASS,
+    // acid eats solid GOLD and the value goes with it (accounted as lost next wave).
+    // MOLTEN_GOLD is a liquid, which acid ignores, so it is intentionally absent.
+    Mat.GOLD,
 ])
     dissolvable[m] = 1;
 export function isDissolvable(m: number): boolean {
@@ -209,6 +253,13 @@ export const PALETTE: MatMeta[] = [
     { id: Mat.OIL, name: "Oil", rgb: [78, 66, 44], cat: "Liquids", key: "4" },
     { id: Mat.ACID, name: "Acid", rgb: [120, 214, 70], cat: "Liquids", key: "5" },
     { id: Mat.LAVA, name: "Lava", rgb: [255, 110, 30], cat: "Liquids", key: "6" },
+    {
+        id: Mat.MOLTEN_GOLD,
+        name: "Molten Gold",
+        rgb: [255, 196, 64],
+        cat: "Liquids",
+        key: "G",
+    },
 
     { id: Mat.STONE, name: "Stone", rgb: [98, 98, 106], cat: "Solids", key: "7" },
     {
@@ -228,6 +279,7 @@ export const PALETTE: MatMeta[] = [
         cat: "Solids",
         key: "A",
     },
+    { id: Mat.GOLD, name: "Gold", rgb: [214, 176, 60], cat: "Solids", key: "D" },
 
     { id: Mat.FIRE, name: "Fire", rgb: [255, 150, 40], cat: "Energy", key: "F" },
     {

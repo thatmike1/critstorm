@@ -65,6 +65,19 @@ function blendBg(r: number, g: number, b: number, t: number): number {
 const BG = rgba(BG_R, BG_G, BG_B);
 
 /**
+ * true when a material transition is the GOLD<->MOLTEN_GOLD melt/freeze pair, the
+ * only setCell transition that preserves the cell's Lagrangian value in place.
+ * a melting or freezing gold cell is the *same particle* changing phase, so its
+ * value must survive; every other transition destroys it.
+ */
+function goldPhaseCarry(from: number, to: number): boolean {
+    return (
+        (from === Mat.GOLD && to === Mat.MOLTEN_GOLD) ||
+        (from === Mat.MOLTEN_GOLD && to === Mat.GOLD)
+    );
+}
+
+/**
  * headless falling-sand core: cells + heat field + step logic on plain typed
  * arrays, with no DOM/canvas dependency. writeImage() fills the core-owned
  * `buf32` (scene) and `glow32` (emissive) pixel buffers so a Pixi texture layer
@@ -81,6 +94,12 @@ export class Simulation {
     stamp: Int32Array; // last frame a cell was touched (prevents double-moves)
     heat: Float32Array; // temperature per cell; diffuses each frame (Eulerian)
     private heatNext: Float32Array; // double buffer for Jacobi-style diffusion
+    // per-cell gold "value" payload. LAGRANGIAN, unlike the Eulerian heat field:
+    // value is a property of the PARTICLE and travels with it, so swap() carries it
+    // and setCell() destroys it unless the transition explicitly preserves it (the
+    // GOLD<->MOLTEN_GOLD melt/freeze pair). read/written via getValue/addValue.
+    // allocated ONCE alongside the grid and never reallocated.
+    readonly value: Float32Array;
 
     frame = 0;
     count = 0;
@@ -112,6 +131,7 @@ export class Simulation {
         this.stamp = new Int32Array(n).fill(-1);
         this.heat = new Float32Array(n).fill(AMBIENT);
         this.heatNext = new Float32Array(n);
+        this.value = new Float32Array(n);
         for (let i = 0; i < n; i++) this.extra[i] = (Math.random() * 256) | 0;
 
         this.chunkW = Math.ceil(W / CS);
@@ -158,9 +178,18 @@ export class Simulation {
         if (emitTemp[mat]) this.heat[i] = emitTemp[mat];
     }
 
-    /** Set a cell to a material, refreshing its random seed + lifespan, and wake it. */
+    /**
+     * Set a cell to a material, refreshing its random seed + lifespan, and wake it.
+     * enforces the value carry contract: a material change destroys the cell's value
+     * (value is Lagrangian — it belongs to a particle, and a phase change to an
+     * unrelated material is a new particle) UNLESS the transition preserves the gold
+     * payload. only the GOLD<->MOLTEN_GOLD melt/freeze pair carries value in place;
+     * every other setCell (spawns, destruction via acid/lava/erase, other phase
+     * changes) zeroes it. centralizing this here means all callers get it right.
+     */
     private setCell(x: number, y: number, mat: number): void {
         const i = y * this.W + x;
+        if (!goldPhaseCarry(this.cells[i], mat)) this.value[i] = 0;
         this.cells[i] = mat;
         this.extra[i] = (Math.random() * 256) | 0;
         this.assignSpawnLife(i, mat);
@@ -174,6 +203,8 @@ export class Simulation {
      * `heat` is deliberately NOT swapped: temperature is a property of *space*
      * (Eulerian field), not of the particle. A moving source re-asserts its
      * emission temperature at its new cell next frame, so this self-corrects.
+     * `value` IS swapped: it is Lagrangian, so the gold payload rides along with
+     * the cell it belongs to (the mirror image of heat).
      */
     private swap(x1: number, y1: number, x2: number, y2: number): void {
         const i1 = y1 * this.W + x1;
@@ -181,6 +212,9 @@ export class Simulation {
         const c = this.cells[i1];
         this.cells[i1] = this.cells[i2];
         this.cells[i2] = c;
+        const v = this.value[i1];
+        this.value[i1] = this.value[i2];
+        this.value[i2] = v;
         const l = this.life[i1];
         this.life[i1] = this.life[i2];
         this.life[i2] = l;
@@ -209,6 +243,36 @@ export class Simulation {
                 this.setCell(x, y, mat);
             }
         }
+    }
+
+    // ---- value field API ---------------------------------------------------
+    // small, typed surface over the Lagrangian value field. the eruption spawner
+    // seeds value onto freshly-landed MOLTEN_GOLD cells; the collector reads and
+    // drains it. movement (swap) and the melt/freeze pair carry it automatically,
+    // so callers never touch the raw array.
+
+    /** read the gold value stored at cell (x,y). out-of-bounds reads as 0. */
+    getValue(x: number, y: number): number {
+        if (x < 0 || y < 0 || x >= this.W || y >= this.H) return 0;
+        return this.value[y * this.W + x];
+    }
+
+    /**
+     * add `amount` to the gold value at cell (x,y) and wake it. no-op out of
+     * bounds. used to distribute an eruption's payout across its cells; the value
+     * then rides the particle via swap() and survives the melt/freeze round-trip.
+     */
+    addValue(x: number, y: number, amount: number): void {
+        if (x < 0 || y < 0 || x >= this.W || y >= this.H) return;
+        this.value[y * this.W + x] += amount;
+        this.wake(x, y);
+    }
+
+    /** sum of the whole value field — the "in play" term of the conservation ledger. */
+    totalValue(): number {
+        let sum = 0;
+        for (let i = 0; i < this.value.length; i++) sum += this.value[i];
+        return sum;
     }
 
     /** materials a bolt arcs *through* (and superheats) instead of stopping at. */
@@ -361,6 +425,7 @@ export class Simulation {
         this.cells.fill(Mat.EMPTY);
         this.life.fill(0);
         this.heat.fill(AMBIENT);
+        this.value.fill(0);
         this.activeNext.fill(1);
     }
 
@@ -382,6 +447,9 @@ export class Simulation {
         this.cells.set(cells);
         this.life.fill(0);
         this.heat.fill(AMBIENT);
+        // snapshots are materials-only (RLE of `cells`); a restored scene carries no
+        // payload, so reset value or a stale ledger would survive a load.
+        this.value.fill(0);
         for (let i = 0; i < n; i++) {
             this.extra[i] = (Math.random() * 256) | 0;
             // fire/smoke/steam need a lifespan or they'd die on the first frame.
@@ -586,6 +654,18 @@ export class Simulation {
             case Mat.ICE:
                 this.updateIce(x, y);
                 return;
+            case Mat.GOLD:
+                // sustained molten heat liquefies gold; the melt carries value across
+                // (setCell preserves it for the GOLD->MOLTEN_GOLD transition).
+                if (this.heat[i] >= meltPoint[Mat.GOLD]) {
+                    this.setCell(x, y, Mat.MOLTEN_GOLD);
+                    return;
+                }
+                this.updatePowder(x, y, m);
+                return;
+            case Mat.MOLTEN_GOLD:
+                this.updateMoltenGold(x, y, i);
+                return;
         }
     }
 
@@ -785,6 +865,16 @@ export class Simulation {
         );
     }
 
+    /** true if any 4-neighbor is LAVA (which devours molten gold on contact). */
+    private nearLava(x: number, y: number): boolean {
+        return (
+            this.matAt(x, y - 1) === Mat.LAVA ||
+            this.matAt(x, y + 1) === Mat.LAVA ||
+            this.matAt(x - 1, y) === Mat.LAVA ||
+            this.matAt(x + 1, y) === Mat.LAVA
+        );
+    }
+
     /** true if any 4-neighbor is WATER (wets gunpowder, shielding it from ignition). */
     private nearWater(x: number, y: number): boolean {
         return (
@@ -928,6 +1018,27 @@ export class Simulation {
         this.wake(x, y);
     }
 
+    /**
+     * Molten gold: consumed on lava contact (value lost), freezes back to solid
+     * GOLD once cooled below its gate (value preserved), otherwise flows as a dense
+     * liquid. Freeze is checked before movement so a resting pool solidifies in
+     * place rather than creeping a frame further each time.
+     */
+    private updateMoltenGold(x: number, y: number, i: number): void {
+        // lava devours molten gold: the cell empties and its value is lost (setCell
+        // to EMPTY zeroes the payload). checked first so a hot cell can never dodge
+        // absorption by flowing away.
+        if (this.nearLava(x, y)) {
+            this.setCell(x, y, Mat.EMPTY);
+            return;
+        }
+        if (this.heat[i] <= freezePoint[Mat.MOLTEN_GOLD]) {
+            this.setCell(x, y, Mat.GOLD); // value carried across by setCell
+            return;
+        }
+        this.updateLiquid(x, y, Mat.MOLTEN_GOLD);
+    }
+
     private explode(x: number, y: number): void {
         const R = 5;
         const R2 = R * R;
@@ -954,7 +1065,8 @@ export class Simulation {
     private colorOf(m: number, lf: number, ex: number, h: number): number {
         if (this.showTemp) return this.heatColor(h);
         const c = this.baseColor(m, lf, ex);
-        if (m === Mat.FIRE || m === Mat.LAVA || m === Mat.LIGHTNING) return c;
+        if (m === Mat.FIRE || m === Mat.LAVA || m === Mat.LIGHTNING || m === Mat.MOLTEN_GOLD)
+            return c;
         return this.tint(c, h);
     }
 
@@ -1022,6 +1134,14 @@ export class Simulation {
                 const f = ((ex + this.frame * 2) % 44) - 18;
                 return shade(255, 110, 30, f);
             }
+            case Mat.GOLD:
+                // metallic gold with a coarse glitter; some cells catch a bright fleck.
+                return shade(214, 176, 60, (ex % 44 > 36 ? 20 : 0) + (ex % 22) - 10);
+            case Mat.MOLTEN_GOLD: {
+                // hot liquid gold, animated like lava but shifted brighter/yellower.
+                const f = ((ex + this.frame * 2) % 40) - 16;
+                return shade(255, 196, 64, f);
+            }
             case Mat.LIGHTNING: {
                 // hot near-white core with a blue cast; fast per-cell flicker keeps the
                 // bolt alive-looking across its few render frames. brighter while young.
@@ -1065,7 +1185,7 @@ export class Simulation {
             count++;
             const c = this.colorOf(m, life[i], extra[i], heat[i]);
             buf32[i] = c;
-            if (m === Mat.FIRE || m === Mat.LAVA || m === Mat.LIGHTNING) {
+            if (m === Mat.FIRE || m === Mat.LAVA || m === Mat.LIGHTNING || m === Mat.MOLTEN_GOLD) {
                 glow32[i] = c;
                 emissive++;
             } else {
