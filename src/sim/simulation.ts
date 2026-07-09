@@ -78,6 +78,26 @@ function goldPhaseCarry(from: number, to: number): boolean {
 }
 
 /**
+ * why a gold cell's Lagrangian value was destroyed instead of collected. carried
+ * on {@link GoldLossEvent} so the feedback tell can read differently per hazard
+ * (acid hiss vs lava roar vs a manual erase) and the ledger can bucket the loss.
+ */
+export type GoldLossCause = "acid" | "lava" | "erase";
+
+/**
+ * a single gold-value loss: the doomed cell (x,y), the `amount` of value about to
+ * be destroyed, and its `cause`. emitted the instant BEFORE the cell is zeroed, so
+ * a subscriber can flash/blip at the exact spot (risk reads instantly) and the
+ * conservation ledger can account the amount as lost.
+ */
+export interface GoldLossEvent {
+    x: number;
+    y: number;
+    amount: number;
+    cause: GoldLossCause;
+}
+
+/**
  * headless falling-sand core: cells + heat field + step logic on plain typed
  * arrays, with no DOM/canvas dependency. writeImage() fills the core-owned
  * `buf32` (scene) and `glow32` (emissive) pixel buffers so a Pixi texture layer
@@ -105,6 +125,11 @@ export class Simulation {
     count = 0;
     emissive = 0; // fire/lava cell count this frame; lets renderer skip glow passes
     private showTemp = false; // debug heatmap: render heat as a blue->red ramp
+    // feedback seam for gold-value loss (§4.1 conservation "lost" term). the core
+    // stays headless: it just REPORTS each destruction (cell, amount, cause) and a
+    // renderer/audio layer turns that into a flash + blip so risk reads instantly.
+    // null by default => the sim runs standalone with zero feedback overhead.
+    private onGoldLoss: ((e: GoldLossEvent) => void) | null = null;
 
     // Dirty-chunk scheduler: only chunks flagged active get simulated.
     readonly chunkW: number;
@@ -240,6 +265,12 @@ export class Simulation {
                 if (x < 0 || y < 0 || x >= this.W || y >= this.H) continue;
                 // Don't overwrite indestructible walls unless we're erasing.
                 if (mat !== Mat.EMPTY && this.cells[y * this.W + x] === Mat.WALL) continue;
+                // erasing a valued gold cell (solid or molten) is a loss: fire the
+                // tell before setCell zeroes the payload, mirroring acid/lava.
+                if (mat === Mat.EMPTY) {
+                    const c = this.cells[y * this.W + x];
+                    if (c === Mat.GOLD || c === Mat.MOLTEN_GOLD) this.reportGoldLoss(x, y, "erase");
+                }
                 this.setCell(x, y, mat);
             }
         }
@@ -273,6 +304,30 @@ export class Simulation {
         let sum = 0;
         for (let i = 0; i < this.value.length; i++) sum += this.value[i];
         return sum;
+    }
+
+    // ---- gold-loss feedback seam -------------------------------------------
+    // the three loss paths (acid dissolves GOLD, lava absorbs MOLTEN_GOLD, erase)
+    // all destroy a cell's value by going through setCell -> EMPTY. each first
+    // routes through reportGoldLoss so the loss surfaces as a single event: the
+    // visible/audible risk tell and the ledger's "lost" term share one seam.
+
+    /** register (or clear with null) the gold-loss feedback listener. */
+    setGoldLossListener(fn: ((e: GoldLossEvent) => void) | null): void {
+        this.onGoldLoss = fn;
+    }
+
+    /**
+     * announce that the gold value at (x,y) is about to be destroyed by `cause`.
+     * reads the doomed payload via the value API and fires the loss tell when it's
+     * non-zero; the value itself is zeroed by the setCell(...EMPTY) that follows at
+     * the call site (single source of truth for the carry contract). no-op when no
+     * listener is attached, so headless runs pay nothing.
+     */
+    private reportGoldLoss(x: number, y: number, cause: GoldLossCause): void {
+        if (!this.onGoldLoss) return;
+        const amount = this.getValue(x, y);
+        if (amount !== 0) this.onGoldLoss({ x, y, amount, cause });
     }
 
     /** materials a bolt arcs *through* (and superheats) instead of stopping at. */
@@ -968,7 +1023,10 @@ export class Simulation {
             const nx = x + dx,
                 ny = y + dy;
             if (nx < 0 || ny < 0 || nx >= this.W || ny >= this.H) continue;
-            if (isDissolvable(this.cells[ny * this.W + nx]) && Math.random() < 0.25) {
+            const target = this.cells[ny * this.W + nx];
+            if (isDissolvable(target) && Math.random() < 0.25) {
+                // only GOLD carries value; the tell fires before setCell zeroes it.
+                if (target === Mat.GOLD) this.reportGoldLoss(nx, ny, "acid");
                 this.setCell(nx, ny, Mat.EMPTY);
                 if (Math.random() < 0.4) {
                     this.setCell(x, y, Mat.SMOKE);
@@ -1029,6 +1087,7 @@ export class Simulation {
         // to EMPTY zeroes the payload). checked first so a hot cell can never dodge
         // absorption by flowing away.
         if (this.nearLava(x, y)) {
+            this.reportGoldLoss(x, y, "lava"); // risk tell before the value is zeroed
             this.setCell(x, y, Mat.EMPTY);
             return;
         }
