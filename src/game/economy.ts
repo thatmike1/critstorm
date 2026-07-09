@@ -154,10 +154,27 @@ export function buy(s: EconomyState, id: UpgradeId): boolean {
     return true;
 }
 
-/** apply one attack's result to the economy */
+/**
+ * apply one attack's result to the economy. essence is NOT credited here: an
+ * attack erupts gold into the world, and essence is only minted when that gold
+ * reaches the collector (see {@link valueToEssence} and the collector drain,
+ * design §4.3). this only advances the lifetime damage ledger that drives ranks.
+ */
 export function applyAttack(s: EconomyState, r: AttackResult): void {
-    s.essence += r.damage;
     s.totalDamage += r.damage;
+}
+
+/** base collector fee: the fraction of arriving gold value skimmed on conversion (design §4.3/§6). */
+export const COLLECTOR_BASE_FEE = 0.3;
+
+/**
+ * convert an arriving gold cell's raw value into essence, skimming `fee`.
+ * essence = value × (1 − fee). fee is clamped to [0,1] so an out-of-range
+ * upgrade value can never mint essence (fee < 0) nor invert it (fee > 1).
+ */
+export function valueToEssence(value: number, fee: number = COLLECTOR_BASE_FEE): number {
+    const clamped = Math.min(Math.max(fee, 0), 1);
+    return value * (1 - clamped);
 }
 
 /** advance time, returning the attacks that fired during dt */

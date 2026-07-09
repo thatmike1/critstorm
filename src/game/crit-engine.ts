@@ -2,6 +2,7 @@ import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import { formatNumber } from "./format";
 import { createWorld, type World } from "./world";
 import { SimLayer } from "./sim-layer";
+import type { Simulation } from "../sim/simulation";
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
 const TIER_COLORS = [
@@ -87,6 +88,16 @@ export class CritEngine {
             this.pool.push(t);
         }
         app.ticker.add((ticker) => this.update(ticker.deltaMS));
+    }
+
+    /** the storm world, exposed read-only so the collector can drain its sim (wave 3). */
+    get storm(): World {
+        return this.world;
+    }
+
+    /** the headless falling-sand simulation backing the storm world. */
+    get simulation(): Simulation {
+        return this.world.sim;
     }
 
     static async create(host: HTMLElement): Promise<CritEngine> {
