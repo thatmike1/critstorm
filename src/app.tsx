@@ -24,6 +24,7 @@ import {
     type UpgradeId,
 } from "./game/economy";
 import { formatNumber } from "./game/format";
+import { Collector, defaultCollectorRegion } from "./game/collector";
 
 /** clicking heat: each manual click adds this much (0-100 scale) */
 const HEAT_PER_CLICK = 7;
@@ -149,11 +150,16 @@ export function App() {
             }
             engine = e;
             engineRef.current = e;
+            // the drain: solid gold settling in this band becomes essence at
+            // (1 - fee). essence now flows ONLY through here (applyAttack no longer
+            // credits it), so an attack pays out only once its gold reaches home.
+            const collector = new Collector(defaultCollectorRegion(e.storm));
             const frame = (now: number) => {
                 const dt = Math.min((now - last) / 1000, 0.1);
                 last = now;
                 const s = stateRef.current;
                 const results = tick(s, dt, Math.random);
+                s.essence += collector.collect(e.simulation);
                 for (const r of results) {
                     engine!.spawn(r.damage, r.tier, r.golden);
                     audioRef.current.attack(r.tier);
