@@ -71,6 +71,12 @@ interface Eruption {
 
 const POOL_SIZE = 600;
 
+/** visual tier for the BANK mega-eruption (design §3): drives only the projectile
+ * spread, colour, and shake of the spectacle. the deposited material is always
+ * MOLTEN_GOLD, so the banked mountain cools to collectable GOLD regardless of tier —
+ * the pot is physical gold, never lava (that is the overheat bust, hkm.4). */
+const BANK_TIER = 4;
+
 /** clamp `v` into the inclusive integer range [lo, hi]. */
 function clampInt(v: number, lo: number, hi: number): number {
     return v < lo ? lo : v > hi ? hi : v;
@@ -251,6 +257,27 @@ export class CritEngine {
             payout,
             tier,
         });
+    }
+
+    /**
+     * BANK the surge pot (design §3): the entire pot erupts at once as a single gold
+     * mega-eruption — the spectacle payoff. reuses the ballistic-flight → MOLTEN_GOLD
+     * handoff of {@link erupt} (mass/value from §6: `m = clamp(4 + 6·log10(P), 4, 64)`,
+     * `P/m` per cell), but forces the impact onto the storm core so the mountain piles
+     * over the collector below. the banked gold is PHYSICAL: it must still cool, settle,
+     * and be collected — it does NOT convert directly to essence. `payout <= 0` no-ops.
+     */
+    eruptBank(payout: number): void {
+        if (!(payout > 0)) return;
+        const { W, H } = this.world.sim;
+        const sw = this.app.screen.width;
+        const sh = this.app.screen.height;
+        // aim straight at the core so the mountain lands over the collector beneath it.
+        const target = { x: (this.world.core.x / W) * sw, y: (this.world.core.y / H) * sh };
+        this.erupt(payout, BANK_TIER, target);
+        // mega tell: a big gold flash + shake so the bank reads as the spectacle payoff.
+        this.flashScreen(0xffd75e, 0.35);
+        this.shake(14);
     }
 
     /**

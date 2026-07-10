@@ -466,6 +466,34 @@ body,
   to   { box-shadow: 0 0 24px rgba(255, 46, 70, 0.75), inset 0 0 14px rgba(255, 138, 46, 0.5); }
 }
 
+.bank-btn {
+  margin-left: auto;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 2px solid var(--gold-hi);
+  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
+  color: #1a0a00;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(244, 207, 90, 0.6);
+}
+
+.bank-btn em {
+  font-style: normal;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.bank-btn:hover {
+  filter: brightness(1.1);
+}
+
+.bank-btn:active {
+  transform: translateY(1px);
+}
+
 /* ─── rank ───────────────────────────────────────────────────────────── */
 
 .rank {

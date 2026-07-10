@@ -31,10 +31,6 @@ const HEAT_PER_CLICK = 7;
 /** heat decay per second — stop clicking and the meter drains (pre-surge only) */
 const HEAT_DECAY = 16;
 
-/** how long the placeholder surge rides before its exit seam fires (design §3 —
- * the real BANK/overheat exits live in hkm.3/hkm.4; this keeps the machine loopable). */
-const SURGE_PLACEHOLDER_SECONDS = 8;
-
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;
 
@@ -113,7 +109,6 @@ export function App() {
     // the swelling pot, and the exit seam. lives in a ref so its state survives
     // re-renders; the HUD mirrors it through `heat` + `surgeHud` each frame.
     const surgeRef = useRef(new Surge());
-    const surgeTimerRef = useRef(0);
     const nextBonusRef = useRef(firstBonusDelay());
     const [hud, setHud] = useState<HudState>(() => snapshot(stateRef.current));
     const [muted, setMuted] = useState(false);
@@ -170,13 +165,15 @@ export function App() {
                 const results = tick(s, dt, Math.random);
                 s.essence += collector.collect(e.simulation);
                 for (const r of results) {
-                    // erupt this hit's gold into the world; it falls, cools, and
-                    // settles into the collector band, which mints the essence.
                     engine!.spawn(r.damage, r.tier, r.golden);
-                    // auto-strikes have no cursor: erupt at a random strike-zone point.
-                    engine!.erupt(r.damage, r.tier);
-                    // inside a surge, every strike also folds into the pot (design §3).
+                    // inside a surge, every strike folds into the pot (design §3).
                     surge.recordStrike(r, baseDamage(s));
+                    // de-dup (hkm.3): during a surge the strike's gold is captured by
+                    // the pot and paid out once on BANK, so it must NOT also erupt as
+                    // collectable world gold — that would double-credit (pot + world).
+                    // outside a surge it erupts normally (auto-strikes have no cursor,
+                    // so they land at a random strike-zone point) and feeds the drain.
+                    if (!surge.active) engine!.erupt(r.damage, r.tier);
                     audioRef.current.attack(r.tier);
                     if (r.golden) audioRef.current.golden();
                 }
@@ -188,16 +185,9 @@ export function App() {
                 // busts itself through its own exit seam (a no-op while idle). the bust
                 // spectacle — lava eruption — is hkm.4.
                 surge.tickHeat(dt);
-                // placeholder voluntary exit (design §3): the real BANK is hkm.3. until
-                // then, ride a fixed time then BANK so a surge that never overheats still
-                // loops and the pot glow does not hang on forever.
-                if (surge.active) {
-                    surgeTimerRef.current += dt;
-                    if (surgeTimerRef.current >= SURGE_PLACEHOLDER_SECONDS) {
-                        surge.endSurge("bank");
-                        surgeTimerRef.current = 0;
-                    }
-                }
+                // the surge now ends on the player's terms: BANK (spacebar or the HUD
+                // button) erupts the pot as one gold mega-mountain (design §3, hkm.3).
+                // the overheat bust is the other exit (hkm.4, not yet wired).
                 engine!.renderSurge(surge.active ? surge.pot : null);
                 if (s.elapsed >= nextBonusRef.current) {
                     engine!.spawnBonus(catchBonus);
@@ -244,17 +234,51 @@ export function App() {
         if (surge.addHeat(HEAT_PER_CLICK)) audioRef.current.frenzy();
         const r = rollAttack(s, Math.random);
         applyAttack(s, r);
-        // during a surge the click's strike also folds into the pot (design §3).
+        // during a surge the click's strike folds into the pot (design §3).
         surge.recordStrike(r, baseDamage(s));
-        // a manual hit erupts gold too, so clicking feeds the collector like the
-        // auto-loop does — essence flows only through the drain, never here. the
-        // ballistic eruption arcs from the core to the click (target) and deposits
-        // molten gold that falls, cools, and settles into the collector band.
         engineRef.current?.spawn(r.damage, r.tier, r.golden);
-        engineRef.current?.erupt(r.damage, r.tier, target);
+        // outside a surge a manual hit erupts gold, so clicking feeds the collector
+        // like the auto-loop does — essence flows only through the drain, never here.
+        // the ballistic eruption arcs from the core to the click (target) and deposits
+        // molten gold that falls, cools, and settles into the collector band. during a
+        // surge the strike is captured by the pot instead and paid out once on BANK, so
+        // erupting here too is suppressed to avoid double-crediting (de-dup, hkm.3).
+        if (!surge.active) engineRef.current?.erupt(r.damage, r.tier, target);
         audioRef.current.attack(Math.max(r.tier, 1));
         if (r.golden) audioRef.current.golden();
     };
+
+    /**
+     * BANK the surge (design §3): end the surge via the exit seam with reason
+     * `bank` and erupt the whole pot at once as a single gold mega-mountain at the
+     * current multiplier. the banked gold is physical — it must still cool, settle,
+     * and be collected, it does not convert straight to essence. a no-op when no
+     * surge is live. wired to both the spacebar and the HUD BANK button.
+     */
+    const bankSurge = () => {
+        const surge = surgeRef.current;
+        if (!surge.active) return;
+        audioRef.current.unlock();
+        const pot = surge.endSurge("bank");
+        if (pot.value > 0) {
+            engineRef.current?.eruptBank(pot.value);
+            audioRef.current.jackpot();
+        }
+    };
+
+    // spacebar banks a live surge (design §3). preventDefault stops the space from
+    // scrolling or re-triggering a focused button; the guard inside bankSurge makes
+    // it harmless pre-surge. refs keep the handler stable across renders.
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.code !== "Space") return;
+            e.preventDefault();
+            bankSurge();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const buyUpgrade = (id: UpgradeId) => {
         audioRef.current.unlock();
@@ -321,6 +345,9 @@ export function App() {
                         <span className="frenzy-word">SURGE</span>
                         <span className="frenzy-x">×{surgeHud.multiplier.toFixed(2)}</span>
                         <span className="frenzy-time">pot {formatNumber(surgeHud.potValue)}</span>
+                        <button className="bank-btn" onClick={bankSurge}>
+                            BANK <em>space</em>
+                        </button>
                     </div>
                 ) : (
                     <div className="heat">
