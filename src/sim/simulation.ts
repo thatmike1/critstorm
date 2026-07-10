@@ -81,8 +81,11 @@ function goldPhaseCarry(from: number, to: number): boolean {
  * why a gold cell's Lagrangian value was destroyed instead of collected. carried
  * on {@link GoldLossEvent} so the feedback tell can read differently per hazard
  * (acid hiss vs lava roar vs a manual erase) and the ledger can bucket the loss.
+ * `bust` is the surge overheat detonation (design §3): the pot burns as lava/fire
+ * and never lands as gold, so its value is lost without a value-field cell backing
+ * it — reported through {@link Simulation.reportLoss} rather than an in-world path.
  */
-export type GoldLossCause = "acid" | "lava" | "erase";
+export type GoldLossCause = "acid" | "lava" | "erase" | "bust";
 
 /**
  * a single gold-value loss: the doomed cell (x,y), the `amount` of value about to
@@ -276,6 +279,30 @@ export class Simulation {
         }
     }
 
+    /**
+     * raise a filled disc of radius `r` around (cx,cy) to at least `temp`, waking
+     * each touched cell so the change is stepped. a one-shot heat-injection primitive
+     * (design §3 overheat / §6 tier temps): the caller picks the temperature, this
+     * only stamps it — no material changes here, so melt/ignite/boil all emerge from
+     * the field on the next {@link step}. uses a max so injecting near a lava pool can
+     * never COOL it, and never lowers a hotter cell. out-of-bounds cells are skipped.
+     */
+    injectHeat(cx: number, cy: number, r: number, temp: number): void {
+        const r2 = r * r;
+        for (let dy = -r; dy <= r; dy++) {
+            const y = cy + dy;
+            if (y < 0 || y >= this.H) continue;
+            for (let dx = -r; dx <= r; dx++) {
+                if (dx * dx + dy * dy > r2) continue;
+                const x = cx + dx;
+                if (x < 0 || x >= this.W) continue;
+                const i = y * this.W + x;
+                if (this.heat[i] < temp) this.heat[i] = temp;
+                this.wake(x, y);
+            }
+        }
+    }
+
     // ---- value field API ---------------------------------------------------
     // small, typed surface over the Lagrangian value field. the eruption spawner
     // seeds value onto freshly-landed MOLTEN_GOLD cells; the collector reads and
@@ -341,6 +368,25 @@ export class Simulation {
         if (!this.onGoldLoss) return;
         const amount = this.getValue(x, y);
         if (amount !== 0) this.onGoldLoss({ x, y, amount, cause });
+    }
+
+    /**
+     * report a gold loss NOT backed by a value-field cell. the three in-world paths
+     * ({@link reportGoldLoss}) read the doomed amount from the cell they are about to
+     * zero, but the surge overheat bust (design §3) burns the pot before it ever
+     * lands as gold — the value exists only in the {@link Surge} pot, so the amount
+     * is passed in. routes through the SAME listener so one subscriber buckets every
+     * loss and the conservation ledger stays whole. no-op when the amount is zero or
+     * no listener is attached (headless runs pay nothing).
+     * @param x cell to anchor the risk tell at (the storm core for a bust).
+     * @param y see `x`.
+     * @param amount the value lost; non-positive amounts fire nothing.
+     * @param cause the loss bucket (`bust` for an overheat detonation).
+     */
+    reportLoss(x: number, y: number, amount: number, cause: GoldLossCause): void {
+        if (!this.onGoldLoss) return;
+        if (!(amount > 0)) return;
+        this.onGoldLoss({ x, y, amount, cause });
     }
 
     /** materials a bolt arcs *through* (and superheats) instead of stopping at. */

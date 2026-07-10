@@ -4,6 +4,7 @@ import { createWorld, type World } from "./world";
 import { SimLayer } from "./sim-layer";
 import type { Simulation } from "../sim/simulation";
 import { depositEruption } from "./eruption";
+import { bustPot } from "./bust";
 import type { PotState } from "./surge";
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
@@ -318,6 +319,21 @@ export class CritEngine {
         this.coreGlow.circle(0, 0, radius * 0.62).fill({ color: 0xffd75e, alpha });
         this.coreGlow.circle(0, 0, radius * 0.28).fill({ color: 0xffffff, alpha });
         this.coreGlow.position.set(cx, cy);
+    }
+
+    /**
+     * the overheat-bust exit (design §3): the surge pot detonates instead of banking.
+     * runs the grid-side conversion on the world sim — the pot burns as lava+fire at
+     * the core (its value lost, not collected) and pooled world gold near the core
+     * melts into risk — then extinguishes the pot glow and throws a violent red flash
+     * + shake so the loss reads. the value bookkeeping lives in {@link bustPot}; this
+     * is the presentation-side consumer of the surge machine's 'bust' reason.
+     */
+    bust(pot: PotState): void {
+        bustPot(this.world.sim, this.world.core.x, this.world.core.y, pot);
+        this.renderSurge(null); // the pot is gone — kill the swelling core glow
+        this.flashScreen(0xff3311, 0.4);
+        this.shake(16);
     }
 
     /**
