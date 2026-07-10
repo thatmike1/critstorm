@@ -4,6 +4,8 @@ import { Simulation } from "../sim/simulation";
 import { createWorld } from "./world";
 import { Collector, defaultCollectorRegion } from "./collector";
 import { COLLECTOR_BASE_FEE } from "./economy";
+import type { AttackResult } from "./economy";
+import { Surge } from "./surge";
 import {
     MAX_ERUPTION_CELLS,
     MIN_ERUPTION_CELLS,
@@ -192,5 +194,88 @@ describe("eruption → collector end-to-end (value drains to essence at the fee)
         // no value sinks (no lava/acid in the flats world), so the whole hit drains
         // (Float32 value field, so allow a small relative tolerance).
         expectClose(essence, P * (1 - COLLECTOR_BASE_FEE));
+    });
+});
+
+// the BANK mega-eruption (design §3, hkm.3). the pixi ballistic flight is a visual
+// (CritEngine.eruptBank); at the grid level a BANK is a single depositEruption of the
+// whole pot value at the core, which is what these tests exercise. the de-dup choice
+// (hkm.3): during a surge the per-strike gold eruption is SUPPRESSED — the pot is the
+// sole payout — so banking pot.value credits the strikes exactly once, never twice.
+
+/** a non-crit strike (tier 0). */
+function normal(damage: number): AttackResult {
+    return { damage, tier: 0, golden: false };
+}
+
+/** a crit strike (tier >= 1). */
+function crit(damage: number, tier = 1): AttackResult {
+    return { damage, tier, golden: false };
+}
+
+describe("BANK eruption — the pot erupts as one conserving gold mountain", () => {
+    it("deposits exactly the pot value, mass clamped to the §6 ceiling for a big pot", () => {
+        const sim = new Simulation(96, 72);
+        // a fat pot: eruptionMass clamps to MAX_ERUPTION_CELLS, value pot/64 per cell.
+        const potValue = 1e11;
+        const m = eruptionMass(potValue);
+        expect(m).toBe(MAX_ERUPTION_CELLS);
+        const deposited = depositEruption(sim, 48, 30, potValue);
+        expect(deposited).toBeCloseTo(potValue, 4);
+        expectClose(sim.totalValue(), potValue);
+        let molten = 0;
+        for (let i = 0; i < sim.cells.length; i++) {
+            if (sim.cells[i] === Mat.MOLTEN_GOLD) {
+                molten++;
+                expectClose(sim.value[i], potValue / m);
+            }
+        }
+        expect(molten).toBe(m);
+    });
+});
+
+describe("surge → bank → collect conserves value end-to-end (de-dup pin, hkm.3)", () => {
+    it("banks the whole pot as physical gold that drains to pot·(1−fee) essence", () => {
+        // a full surge: ignite, ride a mixed run of strikes into the pot, then BANK.
+        // because per-strike gold is suppressed during a surge (the de-dup choice), the
+        // ONLY gold that ever enters the world this surge is the banked pot — so
+        // `total erupted === pot.value`, and it must drain to essence at exactly the
+        // fee with nothing lost (no double-credit, no minting). this is the invariant
+        // `sum(value) + collected + lost === total erupted` across the whole path.
+        const world = createWorld({ seed: 3 });
+        const base = 5;
+        // an uncappable core: this test pins BANK-path value conservation, not the
+        // hkm.2 heating tune — with the real critical temp the tier 3+2+4 spikes
+        // below can bust the surge mid-ride and wipe the pot before the bank.
+        const surge = new Surge({}, { criticalTemp: Number.POSITIVE_INFINITY });
+        expect(surge.addHeat(100)).toBe(true); // ignite
+
+        // ride: two non-crits (base each) + three crits (payout + multiplier bumps).
+        surge.recordStrike(normal(0), base); // +5
+        surge.recordStrike(crit(300, 3), base); // +300, n=1
+        surge.recordStrike(normal(0), base); // +5
+        surge.recordStrike(crit(200, 2), base); // +200, n=2
+        surge.recordStrike(crit(150, 4), base); // +150, n=3
+
+        const pot = surge.endSurge("bank");
+        // contributions = 5+300+5+200+150 = 660; multiplier = 1.5^3 = 3.375.
+        expect(pot.contributions).toBe(660);
+        expect(pot.crits).toBe(3);
+        expect(pot.value).toBeCloseTo(660 * Math.pow(1.5, 3), 6);
+
+        // BANK: the whole pot erupts as one gold mountain at the core (grid-level of
+        // CritEngine.eruptBank). nothing was erupted per-strike, so this is all of it.
+        depositEruption(world.sim, world.core.x, world.core.y, pot.value);
+        expectClose(world.sim.totalValue(), pot.value); // erupted == in play, 0 lost
+
+        // let the mountain cool to solid GOLD, settle, and reach the drain band.
+        for (let i = 0; i < 3000; i++) world.sim.step();
+
+        const collector = new Collector(defaultCollectorRegion(world));
+        const essence = collector.collect(world.sim);
+
+        // conservation: collected(=essence/(1−fee)) + remaining(=0) + lost(=0) === pot.
+        expectClose(essence, pot.value * (1 - COLLECTOR_BASE_FEE));
+        expect(world.sim.totalValue()).toBeCloseTo(0, 4);
     });
 });
