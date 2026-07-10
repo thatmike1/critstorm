@@ -182,8 +182,14 @@ export function App() {
                 }
                 // heat drains only pre-surge; during a surge the machine ignores it.
                 surge.decayHeat(HEAT_DECAY * dt);
-                // placeholder exit seam (design §3): the real BANK/overheat exits are
-                // hkm.3/hkm.4. until then, ride a fixed time then BANK so the machine
+                // drive the surge core-heat model (design §3, hkm.2): the ambient ramp
+                // climbs with surge time and the per-crit spikes land inside
+                // recordStrike above; when the core crosses critical temp the machine
+                // busts itself through its own exit seam (a no-op while idle). the bust
+                // spectacle — lava eruption — is hkm.4.
+                surge.tickHeat(dt);
+                // placeholder voluntary exit (design §3): the real BANK is hkm.3. until
+                // then, ride a fixed time then BANK so a surge that never overheats still
                 // loops and the pot glow does not hang on forever.
                 if (surge.active) {
                     surgeTimerRef.current += dt;
