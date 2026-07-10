@@ -299,6 +299,19 @@ export class Simulation {
         this.wake(x, y);
     }
 
+    /**
+     * the collector's silent drain: clear cell (x,y) to EMPTY and zero its value
+     * WITHOUT firing a gold-loss event. collection is not destruction — the value
+     * leaves as essence, not as the "lost" term (design §4.1), so the loss tell
+     * (hiss/flash) must stay quiet at the drain. this is the ONLY clearing path
+     * that skips the loss report; every erase via {@link paint} still reports, so
+     * a real user brush-erase of gold stays a loss. no-op out of bounds.
+     */
+    drainCell(x: number, y: number): void {
+        if (x < 0 || y < 0 || x >= this.W || y >= this.H) return;
+        this.setCell(x, y, Mat.EMPTY); // setCell zeroes the value via the carry contract
+    }
+
     /** sum of the whole value field — the "in play" term of the conservation ledger. */
     totalValue(): number {
         let sum = 0;
