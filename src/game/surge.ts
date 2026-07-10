@@ -14,6 +14,71 @@ export const SURGE_HEAT_THRESHOLD = 100;
 /** per-crit growth factor of the pot multiplier: `M = 1.5^n` (design §3/§6). */
 export const POT_MULTIPLIER_STEP = 1.5;
 
+/**
+ * a random source in `[0, 1)`, the same shape as `Math.random`. the surge machine
+ * takes one so a host can seed the per-crit heat-spike lottery deterministically
+ * (the §6 tier-temperature bands are ranges, not points — the roll within a tier is
+ * where the gamble lives) while production defaults to real randomness.
+ */
+export type SurgeRng = () => number;
+
+/**
+ * tier floor for surge crits (design §3): every crit landed inside a surge counts
+ * as tier ≥ 1, so its heat spike is drawn from at least the tier-1 band. a real
+ * crit already carries `tier ≥ 1`; this is the load-bearing clamp for the spike math.
+ */
+export const SURGE_TIER_FLOOR = 1;
+
+/**
+ * core critical temperature (design §3/§6): the moment the surge core crosses this,
+ * the surge detonates and the exit seam fires with reason `bust`. a named constant
+ * on purpose — the Aegis meta track raises it later so deep rides become survivable;
+ * a host can override it per-surge through {@link SurgeOptions.criticalTemp}.
+ */
+export const CORE_CRITICAL_TEMP = 490;
+
+/**
+ * ambient-ramp coefficient `q` (design §3/§6): surge time adds `+q·n²` heat per
+ * second, where `n` is the crit count. this is the deterministic anti-stall clock —
+ * heat only ever climbs, so a player cannot wait out a hot core; the quadratic in
+ * `n` means the longer/deeper you have ridden, the faster sitting still cooks you.
+ */
+export const AMBIENT_HEAT_COEFF = 0.15;
+
+/**
+ * per-tier crit heat-spike bands `[min, max]`, indexed by crit tier and anchored to
+ * the design §6 eruption-temperature table (tier 1 → 60–90, tier 2–3 → 130–170,
+ * tier 4–5 → 210–260, tier 6–7 → 330–450, tier 8 → 600+). index 0 is the non-crit
+ * placeholder (no spike). a crit's spike is drawn uniformly inside its tier's band,
+ * so the same roll that pumps the pot is the one that can overheat the core (§3).
+ */
+export const CRIT_SPIKE_BANDS: readonly (readonly [number, number])[] = [
+    [0, 0], // tier 0 — non-crit, never spikes
+    [60, 90], // tier 1
+    [130, 150], // tier 2
+    [150, 170], // tier 3
+    [210, 235], // tier 4
+    [235, 260], // tier 5
+    [330, 390], // tier 6
+    [390, 450], // tier 7
+    [600, 700], // tier 8
+];
+
+/**
+ * the heat a single surge crit injects into the core (design §3/§6). the tier is
+ * clamped to `[SURGE_TIER_FLOOR, maxTier]` and the spike is drawn uniformly from
+ * that tier's {@link CRIT_SPIKE_BANDS} band, so it is random-but-tier-scaled — a
+ * high tier both fattens the pot and risks the bust.
+ * @param tier the crit's tier; floored to {@link SURGE_TIER_FLOOR}.
+ * @param rng a `[0,1)` source for the intra-band draw.
+ */
+export function critHeatSpike(tier: number, rng: SurgeRng): number {
+    const maxTier = CRIT_SPIKE_BANDS.length - 1;
+    const t = Math.min(Math.max(tier, SURGE_TIER_FLOOR), maxTier);
+    const [lo, hi] = CRIT_SPIKE_BANDS[t];
+    return lo + rng() * (hi - lo);
+}
+
 /** the machine is either filling heat pre-surge (`idle`) or riding a live surge. */
 export type SurgePhase = "idle" | "surging";
 
@@ -54,6 +119,27 @@ export interface SurgeListeners {
     onEnd?(reason: SurgeEndReason, pot: PotState): void;
     /** fired whenever the pot (or its reset) changes — the visible-swell seam. */
     onPotChange?(pot: PotState): void;
+    /**
+     * fired whenever the core temperature changes (a crit spike or an ambient tick)
+     * — the instrument seam behind the design §3 core-temp gauge. carries the new
+     * temp and the critical ceiling so a host can render headroom without reaching
+     * into the machine.
+     */
+    onCoreTempChange?(coreTemp: number, criticalTemp: number): void;
+}
+
+/**
+ * construction knobs for the surge machine. both are optional; production leaves
+ * them default (real randomness, the base {@link CORE_CRITICAL_TEMP}) while tests
+ * and the tuning harness seed the spike lottery and vary the ceiling.
+ */
+export interface SurgeOptions {
+    /** `[0,1)` source for the per-crit heat-spike lottery; defaults to `Math.random`. */
+    rng?: SurgeRng;
+    /** core critical temperature; defaults to {@link CORE_CRITICAL_TEMP} (Aegis raises it). */
+    criticalTemp?: number;
+    /** ambient-ramp coefficient `q`; defaults to {@link AMBIENT_HEAT_COEFF}. */
+    ambientCoeff?: number;
 }
 
 /** `M = 1.5^n` for `n` crits landed this surge (design §3/§6). */
@@ -78,10 +164,17 @@ export class Surge {
     private _heat = 0;
     private _contributions = 0;
     private _crits = 0;
+    private _coreTemp = 0;
     private readonly listeners: SurgeListeners;
+    private readonly rng: SurgeRng;
+    private readonly _criticalTemp: number;
+    private readonly ambientCoeff: number;
 
-    constructor(listeners: SurgeListeners = {}) {
+    constructor(listeners: SurgeListeners = {}, options: SurgeOptions = {}) {
         this.listeners = listeners;
+        this.rng = options.rng ?? Math.random;
+        this._criticalTemp = options.criticalTemp ?? CORE_CRITICAL_TEMP;
+        this.ambientCoeff = options.ambientCoeff ?? AMBIENT_HEAT_COEFF;
     }
 
     /** current phase: `idle` (filling heat) or `surging` (a pot is live). */
@@ -102,6 +195,25 @@ export class Surge {
     /** a fresh snapshot of the live pot (all zero while idle). */
     get pot(): PotState {
         return potState(this._contributions, this._crits);
+    }
+
+    /** current core temperature (design §3); 0 while idle, climbs across a surge. */
+    get coreTemp(): number {
+        return this._coreTemp;
+    }
+
+    /** the temperature at which the core busts (design §3/§6); Aegis-tunable per surge. */
+    get criticalTemp(): number {
+        return this._criticalTemp;
+    }
+
+    /**
+     * core temperature as a fraction of critical, clamped to `[0, 1]` (design §3 —
+     * the gauge's fill; `1` is the overheat edge). the bot harness reads this as
+     * `coreLoad`.
+     */
+    get coreLoad(): number {
+        return Math.min(1, Math.max(0, this._coreTemp / this._criticalTemp));
     }
 
     /**
@@ -133,8 +245,12 @@ export class Surge {
 
     /**
      * fold one strike into the pot (design §3). a non-crit adds `base` damage (no
-     * dead clicks inside the centerpiece); a crit adds its full `payout` AND bumps
-     * the crit count, so the multiplier `M = 1.5^n` climbs. a no-op outside a surge.
+     * dead clicks inside the centerpiece); a crit adds its full `payout`, bumps the
+     * crit count so the multiplier `M = 1.5^n` climbs, AND injects a tier-scaled core
+     * heat spike ({@link critHeatSpike}) — the gamble: the same crit that fattens the
+     * pot can overheat the core. if the spike pushes the core past critical the surge
+     * busts immediately (the exit seam fires with reason `bust`, capturing this crit
+     * in the pot — you rode it, it pumped, then it burned). a no-op outside a surge.
      * @param result the rolled attack; `tier > 0` marks it a crit.
      * @param base the current base damage, added for a non-crit strike.
      */
@@ -144,6 +260,19 @@ export class Surge {
         this._contributions += isCrit ? result.damage : base;
         if (isCrit) this._crits += 1;
         this.listeners.onPotChange?.(this.pot);
+        if (isCrit) this.addCoreHeat(critHeatSpike(result.tier, this.rng));
+    }
+
+    /**
+     * advance the ambient heat ramp (design §3/§6): heat only climbs, by `q·n²` per
+     * second of surge time, where `n` is the crit count — the deterministic anti-stall
+     * clock, so sitting on a hot pot cannot cool it. a no-op outside a surge or for a
+     * non-positive `dtSec`. crossing critical here busts the surge just as a spike does.
+     * @param dtSec seconds of surge time elapsed since the last call.
+     */
+    tickHeat(dtSec: number): void {
+        if (this._phase !== "surging" || !(dtSec > 0)) return;
+        this.addCoreHeat(this.ambientCoeff * this._crits * this._crits * dtSec);
     }
 
     /**
@@ -172,10 +301,24 @@ export class Surge {
         this.listeners.onPotChange?.(this.pot);
     }
 
-    /** zero the heat + pot bookkeeping without touching the phase. */
+    /**
+     * add `delta` to the core temperature, announce it, and bust the surge if it
+     * crosses critical (design §3). the single choke point both heat sources — the
+     * per-crit spike and the ambient tick — flow through, so the overheat exit is
+     * defined in exactly one place. `delta` is clamped to non-negative: heat only
+     * ever climbs during a surge.
+     */
+    private addCoreHeat(delta: number): void {
+        this._coreTemp += Math.max(0, delta);
+        this.listeners.onCoreTempChange?.(this._coreTemp, this._criticalTemp);
+        if (this._coreTemp >= this._criticalTemp) this.endSurge("bust");
+    }
+
+    /** zero the heat + pot + core-temp bookkeeping without touching the phase. */
     private clearMeters(): void {
         this._heat = 0;
         this._contributions = 0;
         this._crits = 0;
+        this._coreTemp = 0;
     }
 }
