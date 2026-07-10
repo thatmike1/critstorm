@@ -108,7 +108,17 @@ export function App() {
     // the surge state machine replaces frenzy (design §3): it owns the heat meter,
     // the swelling pot, and the exit seam. lives in a ref so its state survives
     // re-renders; the HUD mirrors it through `heat` + `surgeHud` each frame.
-    const surgeRef = useRef(new Surge());
+    const surgeRef = useRef(
+        new Surge({
+            // the overheat bust (design §3, hkm.4): the machine ends itself when the
+            // core crosses critical (hkm.2), so the lava payload hangs off the exit
+            // seam, covering every machine-initiated exit. BANK stays at its own call
+            // site (bankSurge) because only the player triggers it.
+            onEnd: (reason, pot) => {
+                if (reason === "bust") engineRef.current?.bust(pot);
+            },
+        })
+    );
     const nextBonusRef = useRef(firstBonusDelay());
     const [hud, setHud] = useState<HudState>(() => snapshot(stateRef.current));
     const [muted, setMuted] = useState(false);
