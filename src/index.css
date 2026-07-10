@@ -642,6 +642,74 @@ button:disabled .upgrade-cost {
   box-shadow: none;
 }
 
+/* ─── defense brushes ────────────────────────────────────────────────── */
+
+.brushes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.brushes-label {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* brushes reuse the upgrade button chrome so the shop reads as one system */
+.brushes button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'name cost'
+    'desc cost';
+  align-items: center;
+  column-gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid #2c4a52;
+  border-radius: 9px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-cabinet);
+  background:
+    linear-gradient(180deg, rgba(194, 236, 255, 0.06), transparent 40%),
+    linear-gradient(180deg, #101f24, #06111a);
+  box-shadow:
+    inset 0 1px 0 rgba(194, 236, 255, 0.12),
+    0 2px 0 #050302,
+    0 3px 6px rgba(0, 0, 0, 0.6);
+  transition: transform 0.08s, border-color 0.15s, box-shadow 0.15s, filter 0.15s;
+}
+
+.brushes button:hover:not(:disabled) {
+  border-color: #6fd0e6;
+  box-shadow:
+    inset 0 1px 0 rgba(194, 236, 255, 0.2),
+    0 2px 0 #050302,
+    0 0 14px rgba(111, 208, 230, 0.35);
+}
+
+.brushes button.selected {
+  border-color: #6fd0e6;
+  box-shadow:
+    inset 0 1px 0 rgba(194, 236, 255, 0.25),
+    0 0 16px rgba(111, 208, 230, 0.55);
+}
+
+.brushes button:disabled {
+  cursor: default;
+  filter: grayscale(0.6) brightness(0.62);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+
+/* while a brush is armed the stage is a paint surface, not a strike target */
+.stage.painting {
+  cursor: cell;
+}
+
 /* ─── hint ───────────────────────────────────────────────────────────── */
 
 .hint {

@@ -24,6 +24,7 @@ import {
 import { formatNumber } from "./game/format";
 import { Collector, defaultCollectorRegion } from "./game/collector";
 import { Surge } from "./game/surge";
+import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
 
 /** clicking heat: each manual click adds this much (0-100 scale) */
 const HEAT_PER_CLICK = 7;
@@ -131,6 +132,11 @@ export function App() {
         crits: 0,
     });
     const [pulsing, setPulsing] = useState<Partial<Record<UpgradeId, boolean>>>({});
+    // the selected defense brush (design §4.2). null = attack mode: clicking the
+    // stage fires a manual strike. when a brush is picked the stage becomes a
+    // paint surface instead, and pointer drags paint that material for essence.
+    const [selectedBrush, setSelectedBrush] = useState<BrushId | null>(null);
+    const paintingRef = useRef(false);
 
     useEffect(() => {
         let engine: CritEngine | null = null;
@@ -232,6 +238,47 @@ export function App() {
         };
     }, []);
 
+    /**
+     * paint the active brush at a screen position (design §4.2). maps host-local
+     * px to a grid cell over the stretched sim sprite, then charges essence per
+     * cell painted via {@link paintBrush} — which skips gold/molten-gold/wall so
+     * value is never destroyed. no-op when the stroke paints nothing (unaffordable
+     * or every target cell protected). refreshes the HUD so essence updates live.
+     */
+    const paintAt = (clientX: number, clientY: number): void => {
+        const brushId = selectedBrush;
+        const engine = engineRef.current;
+        const rect = hostRef.current?.getBoundingClientRect();
+        if (!brushId || !engine || !rect || rect.width === 0 || rect.height === 0) return;
+        const brush = BRUSHES.find((b) => b.id === brushId);
+        if (!brush) return;
+        const sim = engine.simulation;
+        const gx = Math.floor(((clientX - rect.left) / rect.width) * sim.W);
+        const gy = Math.floor(((clientY - rect.top) / rect.height) * sim.H);
+        const painted = paintBrush(sim, stateRef.current, brush, gx, gy);
+        if (painted > 0) setHud(snapshot(stateRef.current));
+    };
+
+    const onStagePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+        audioRef.current.unlock();
+        if (selectedBrush) {
+            paintingRef.current = true;
+            audioRef.current.buy();
+            paintAt(e.clientX, e.clientY);
+            return;
+        }
+        manualAttack(e);
+    };
+
+    const onStagePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+        if (!selectedBrush || !paintingRef.current) return;
+        paintAt(e.clientX, e.clientY);
+    };
+
+    const stopPainting = () => {
+        paintingRef.current = false;
+    };
+
     const manualAttack = (e: ReactPointerEvent<HTMLDivElement>) => {
         audioRef.current.unlock();
         const s = stateRef.current;
@@ -306,14 +353,28 @@ export function App() {
         setMuted(audioRef.current.muted);
     };
 
+    /** pick a defense brush, or deselect it (back to attack mode) if re-clicked. */
+    const toggleBrush = (id: BrushId) => {
+        audioRef.current.unlock();
+        setSelectedBrush((cur) => (cur === id ? null : id));
+    };
+
     const surging = surgeHud.active;
+    // a brush is "buyable" while at least one cell of it is affordable — the same
+    // essence gate paintBrush enforces per cell (design §4.2).
+    const affordBrush = (b: BrushDef): boolean => canPaint(stateRef.current, b);
 
     return (
         <div className="layout">
             <div
                 ref={hostRef}
-                className={surging ? "stage frenzy" : "stage"}
-                onPointerDown={manualAttack}
+                className={["stage", surging ? "frenzy" : "", selectedBrush ? "painting" : ""]
+                    .filter(Boolean)
+                    .join(" ")}
+                onPointerDown={onStagePointerDown}
+                onPointerMove={onStagePointerMove}
+                onPointerUp={stopPainting}
+                onPointerLeave={stopPainting}
             />
             <aside className="hud">
                 <div className="title-row">
@@ -401,7 +462,26 @@ export function App() {
                         </button>
                     ))}
                 </div>
-                <p className="hint">click anywhere to attack manually · catch falling 7 7 7</p>
+                <div className="brushes">
+                    <div className="brushes-label">defense brushes</div>
+                    {BRUSHES.map((b) => (
+                        <button
+                            key={b.id}
+                            className={selectedBrush === b.id ? "brush selected" : "brush"}
+                            disabled={selectedBrush !== b.id && !affordBrush(b)}
+                            onClick={() => toggleBrush(b.id)}
+                        >
+                            <span className="upgrade-name">{b.name}</span>
+                            <span className="upgrade-desc">{b.desc}</span>
+                            <span className="upgrade-cost">{formatNumber(b.costPerCell)}/cell</span>
+                        </button>
+                    ))}
+                </div>
+                <p className="hint">
+                    {selectedBrush
+                        ? "drag on the storm to paint · click the brush again to attack"
+                        : "click anywhere to attack manually · catch falling 7 7 7"}
+                </p>
             </aside>
         </div>
     );
