@@ -104,9 +104,19 @@ export function depositEruption(sim: Simulation, cx: number, cy: number, payout:
         targets.push({ x, y });
     }
     // capture any value the target already carries (overlapping still-molten cells)
-    // BEFORE painting zeroes it, so pass 2 can restore it alongside the new share.
-    const prior = targets.map(({ x, y }) => sim.getValue(x, y));
+    // BEFORE painting zeroes it, so pass 2 can restore it alongside the new share —
+    // but ONLY when the paint actually zeroed it. GOLD→MOLTEN_GOLD is a value-
+    // preserving carry transition (see simulation.ts goldPhaseCarry): setCell keeps
+    // the value in place, so re-adding the captured prior there would DOUBLE it.
+    // MOLTEN_GOLD→MOLTEN_GOLD (and any non-carry paint) zeroes it, so restore then.
+    const prior = targets.map(({ x, y }) => ({
+        value: sim.getValue(x, y),
+        carried: sim.cells[y * sim.W + x] === Mat.GOLD,
+    }));
     for (const { x, y } of targets) sim.paint(x, y, 0, Mat.MOLTEN_GOLD);
-    targets.forEach(({ x, y }, i) => sim.addValue(x, y, prior[i] + per));
+    targets.forEach(({ x, y }, i) => {
+        const restore = prior[i].carried ? 0 : prior[i].value;
+        sim.addValue(x, y, restore + per);
+    });
     return per * targets.length;
 }

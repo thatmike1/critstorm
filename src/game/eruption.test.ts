@@ -140,6 +140,21 @@ describe("depositEruption — lands molten gold and conserves value", () => {
         expectClose(sim.totalValue(), P1 + P2);
     });
 
+    it("conserves value landing on a valued solid GOLD cell (no minting)", () => {
+        // GOLD→MOLTEN_GOLD is a value-preserving carry (simulation.ts goldPhaseCarry):
+        // setCell keeps the cell's value in place, so the deposit must NOT also re-add
+        // the captured prior — doing so would MINT value. a P-eruption centred on a
+        // GOLD cell worth `prior` must end at exactly prior + P, not prior + P + prior.
+        const sim = new Simulation(W, H);
+        const prior = 1_000;
+        sim.paint(32, 24, 0, Mat.GOLD);
+        sim.addValue(32, 24, prior);
+        expectClose(sim.totalValue(), prior);
+        const P = 100;
+        depositEruption(sim, 32, 24, P);
+        expectClose(sim.totalValue(), prior + P);
+    });
+
     it("survives the melt/freeze round-trip carry (value rides the phase change)", () => {
         // a single-cell eruption solidifies to GOLD as it cools, then re-melts —
         // the deposited value must ride the GOLD↔MOLTEN_GOLD pair (design §4.1).
