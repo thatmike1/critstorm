@@ -16,23 +16,33 @@ export interface CollectorRegion {
 /** rows above the terrain surface the default drain band reaches, catching gold at rest. */
 const DEFAULT_BAND_ABOVE = 3;
 
+/** width of the default drain in cells — a narrow patch of floor, NOT the full
+ * width. gold sitting outside it is the unbanked, at-risk pot the player routes
+ * toward the drain (design §2); a full-width drain silently auto-banks every
+ * grain the moment it lands, which reads on screen as gold vanishing into an
+ * invisible barrier above the terrain. */
+export const DEFAULT_DRAIN_WIDTH = 40;
+
 /**
- * build the default collector band for a bootstrapped world: a full-width strip
- * hugging the terrain surface, tall enough to cover the surface variation plus a
- * few rows above it — so any solid gold that erupts and settles on the floor
- * lands inside the drain. gameplay may later replace this with placed collectors.
+ * build the default collector for a bootstrapped world: a narrow band hugging
+ * the terrain surface, centred under the storm core, spanning the surface
+ * variation plus a few rows above it — so gold that settles on the drain patch
+ * is collected while gold landing elsewhere visibly pools and must be routed.
+ * gameplay may later replace this with placed collectors.
  */
 export function defaultCollectorRegion(world: World): CollectorRegion {
     const { W } = world.sim;
+    const w = Math.min(DEFAULT_DRAIN_WIDTH, W);
+    const x0 = Math.max(0, Math.min(world.core.x - (w >> 1), W - w));
     let minSurface = Infinity;
     let maxSurface = -Infinity;
-    for (let x = 0; x < W; x++) {
+    for (let x = x0; x < x0 + w; x++) {
         const s = world.floorHeightAt(x);
         if (s < minSurface) minSurface = s;
         if (s > maxSurface) maxSurface = s;
     }
     const top = Math.max(0, minSurface - DEFAULT_BAND_ABOVE);
-    return { x: 0, y: top, w: W, h: Math.max(1, maxSurface - top) };
+    return { x: x0, y: top, w, h: Math.max(1, maxSurface - top) };
 }
 
 /**

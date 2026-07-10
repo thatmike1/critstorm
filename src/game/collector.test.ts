@@ -118,20 +118,37 @@ describe("Collector.collect", () => {
 });
 
 describe("defaultCollectorRegion", () => {
-    it("spans the full width and hugs the terrain surface", () => {
+    it("is a narrow band centred under the core, hugging the terrain surface", () => {
         const world = createWorld({ seed: 1 });
         const region = defaultCollectorRegion(world);
 
-        expect(region.x).toBe(0);
-        expect(region.w).toBe(world.sim.W);
+        // narrow patch, not the full floor — everything outside stays at risk.
+        expect(region.w).toBeLessThan(world.sim.W);
+        expect(region.x).toBeGreaterThanOrEqual(0);
+        expect(region.x + region.w).toBeLessThanOrEqual(world.sim.W);
+        // centred under the storm core (within rounding).
+        expect(Math.abs(region.x + region.w / 2 - world.core.x)).toBeLessThanOrEqual(1);
         expect(region.h).toBeGreaterThan(0);
-        // the band reaches a few rows above the highest surface point.
+        // the band reaches a few rows above the highest surface point of its span.
         let minSurface = Infinity;
-        for (let x = 0; x < world.sim.W; x++) {
+        for (let x = region.x; x < region.x + region.w; x++) {
             minSurface = Math.min(minSurface, world.floorHeightAt(x));
         }
         expect(region.y).toBeLessThan(minSurface);
         expect(region.y).toBeGreaterThanOrEqual(0);
+    });
+
+    it("gold settling outside the drain span is not collected", () => {
+        const world = createWorld({ seed: 1 });
+        const region = defaultCollectorRegion(world);
+        const collector = new Collector(region);
+        // place gold at rest on the surface well outside the drain columns.
+        const x = region.x > world.sim.W - (region.x + region.w) ? 0 : world.sim.W - 1;
+        const y = world.floorHeightAt(x) - 1;
+        placeGold(world.sim, x, y, 100);
+
+        expect(collector.collect(world.sim)).toBe(0);
+        expect(world.sim.cells[y * world.sim.W + x]).toBe(Mat.GOLD);
     });
 
     it("uses the base fee by default when a collector drains that region", () => {
