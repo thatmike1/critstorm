@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Simulation } from "../sim/simulation";
+import { type GoldLossEvent, Simulation } from "../sim/simulation";
 import { Mat } from "../sim/materials";
 import { createWorld } from "./world";
 import { Collector, defaultCollectorRegion, type CollectorRegion } from "./collector";
@@ -87,6 +87,33 @@ describe("Collector.collect", () => {
 
         expect(collector.collect(sim)).toBe(0);
         expect(sim.cells[3 * sim.W + 3]).toBe(Mat.GOLD);
+    });
+    it("collection is silent: mints essence but fires ZERO gold-loss events", () => {
+        const sim = new Simulation(8, 8);
+        placeGold(sim, 3, 4, 100);
+        const collector = new Collector(FULL_REGION(sim));
+        const events: GoldLossEvent[] = [];
+        sim.setGoldLossListener((e) => events.push(e));
+
+        const essence = collector.collect(sim);
+
+        expect(essence).toBeCloseTo(70, 10); // conversion still happens
+        expect(sim.cells[4 * sim.W + 3]).toBe(Mat.EMPTY);
+        expect(sim.getValue(3, 4)).toBe(0);
+        // the drain is not destruction — no loss tell fires at the collector.
+        expect(events).toHaveLength(0);
+    });
+
+    it("a plain paint-erase of gold still fires exactly one loss (drain is the only exception)", () => {
+        const sim = new Simulation(8, 8);
+        placeGold(sim, 3, 4, 100);
+        const events: GoldLossEvent[] = [];
+        sim.setGoldLossListener((e) => events.push(e));
+
+        sim.paint(3, 4, 0, Mat.EMPTY); // manual brush erase
+
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({ x: 3, y: 4, amount: 100, cause: "erase" });
     });
 });
 

@@ -38,8 +38,9 @@ export function defaultCollectorRegion(world: World): CollectorRegion {
 /**
  * the collector (design §4.3): a drain region that turns arriving solid GOLD
  * cells into essence at (1 − fee). each scan reads a collected cell's value via
- * the sim value API, credits `value × (1 − fee)` as essence, then clears the cell
- * (erasing the gold and zeroing its value through the sim's carry contract).
+ * the sim value API, credits `value × (1 − fee)` as essence, then drains the cell
+ * (clearing the gold and zeroing its value through the sim's silent-drain path, so
+ * collection fires NO gold-loss event — it is conversion, not destruction).
  *
  * presentation-free and economy-free: {@link collect} returns the essence minted
  * this call and the caller adds it to the {@link EconomyState}.
@@ -69,9 +70,10 @@ export class Collector {
             for (let x = x0; x < x1; x++) {
                 if (sim.cells[y * sim.W + x] !== Mat.GOLD) continue;
                 essence += valueToEssence(sim.getValue(x, y), this.fee);
-                // remove the collected cell: a radius-0 EMPTY paint clears exactly
-                // this cell and zeroes its value via setCell's carry contract.
-                sim.paint(x, y, 0, Mat.EMPTY);
+                // remove the collected cell via the silent drain: clears the cell and
+                // zeroes its value WITHOUT firing an erase loss event — collection is
+                // conversion to essence, not destruction, so the loss tell stays quiet.
+                sim.drainCell(x, y);
             }
         }
         return essence;
