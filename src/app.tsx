@@ -14,10 +14,8 @@ import {
     critMulti,
     attacksPerSec,
     goldenChance,
-    frenzyActive,
-    startFrenzy,
+    baseDamage,
     rankInfo,
-    FRENZY_MULTI,
     UPGRADES,
     type EconomyState,
     type RankInfo,
@@ -25,12 +23,17 @@ import {
 } from "./game/economy";
 import { formatNumber } from "./game/format";
 import { Collector, defaultCollectorRegion } from "./game/collector";
+import { Surge } from "./game/surge";
 
 /** clicking heat: each manual click adds this much (0-100 scale) */
 const HEAT_PER_CLICK = 7;
 
-/** heat decay per second — stop clicking and the meter drains */
+/** heat decay per second — stop clicking and the meter drains (pre-surge only) */
 const HEAT_DECAY = 16;
+
+/** how long the placeholder surge rides before its exit seam fires (design §3 —
+ * the real BANK/overheat exits live in hkm.3/hkm.4; this keeps the machine loopable). */
+const SURGE_PLACEHOLDER_SECONDS = 8;
 
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;
@@ -48,7 +51,6 @@ interface HudState {
     attacksPerSec: number;
     goldenChance: number;
     rank: RankInfo;
-    frenzySeconds: number;
     levels: Record<UpgradeId, number>;
     costs: Record<UpgradeId, number>;
     affordable: Record<UpgradeId, boolean>;
@@ -69,7 +71,6 @@ function snapshot(s: EconomyState): HudState {
         attacksPerSec: attacksPerSec(s),
         goldenChance: goldenChance(s),
         rank: rankInfo(s),
-        frenzySeconds: s.frenzyTimer,
         levels: { ...s.levels },
         costs,
         affordable,
@@ -108,12 +109,22 @@ export function App() {
     const engineRef = useRef<CritEngine | null>(null);
     const audioRef = useRef<AudioEngine>(new AudioEngine());
     const clickTimesRef = useRef<number[]>([]);
-    const heatRef = useRef(0);
+    // the surge state machine replaces frenzy (design §3): it owns the heat meter,
+    // the swelling pot, and the exit seam. lives in a ref so its state survives
+    // re-renders; the HUD mirrors it through `heat` + `surgeHud` each frame.
+    const surgeRef = useRef(new Surge());
+    const surgeTimerRef = useRef(0);
     const nextBonusRef = useRef(firstBonusDelay());
     const [hud, setHud] = useState<HudState>(() => snapshot(stateRef.current));
     const [muted, setMuted] = useState(false);
     const [cps, setCps] = useState(0);
     const [heat, setHeat] = useState(0);
+    const [surgeHud, setSurgeHud] = useState({
+        active: false,
+        potValue: 0,
+        multiplier: 1,
+        crits: 0,
+    });
     const [pulsing, setPulsing] = useState<Partial<Record<UpgradeId, boolean>>>({});
 
     useEffect(() => {
@@ -126,19 +137,13 @@ export function App() {
         const catchBonus = () => {
             const s = stateRef.current;
             audioRef.current.jackpot();
-            // jackpot: half the time a fat payout, half the time instant frenzy
-            if (Math.random() < 0.5 && !frenzyActive(s)) {
-                startFrenzy(s);
-                audioRef.current.frenzy();
-            } else {
-                const payout = Math.max(expectedDps(s) * 30, 100);
-                // the jackpot is a direct instant grant (design §4.3 bonus), so it
-                // does NOT erupt collectable gold — erupting it would double-credit
-                // once the collector drained that gold back into essence.
-                s.essence += payout;
-                s.totalDamage += payout;
-                engine?.spawn(payout, 5, true);
-            }
+            const payout = Math.max(expectedDps(s) * 30, 100);
+            // the jackpot is a direct instant grant (design §4.3 bonus), so it
+            // does NOT erupt collectable gold — erupting it would double-credit
+            // once the collector drained that gold back into essence.
+            s.essence += payout;
+            s.totalDamage += payout;
+            engine?.spawn(payout, 5, true);
         };
 
         const scheduleBonus = (elapsed: number) => {
@@ -161,6 +166,7 @@ export function App() {
                 const dt = Math.min((now - last) / 1000, 0.1);
                 last = now;
                 const s = stateRef.current;
+                const surge = surgeRef.current;
                 const results = tick(s, dt, Math.random);
                 s.essence += collector.collect(e.simulation);
                 for (const r of results) {
@@ -169,11 +175,24 @@ export function App() {
                     engine!.spawn(r.damage, r.tier, r.golden);
                     // auto-strikes have no cursor: erupt at a random strike-zone point.
                     engine!.erupt(r.damage, r.tier);
+                    // inside a surge, every strike also folds into the pot (design §3).
+                    surge.recordStrike(r, baseDamage(s));
                     audioRef.current.attack(r.tier);
                     if (r.golden) audioRef.current.golden();
                 }
-                // heat drains constantly; frenzy triggers when the meter fills
-                heatRef.current = Math.max(0, heatRef.current - HEAT_DECAY * dt);
+                // heat drains only pre-surge; during a surge the machine ignores it.
+                surge.decayHeat(HEAT_DECAY * dt);
+                // placeholder exit seam (design §3): the real BANK/overheat exits are
+                // hkm.3/hkm.4. until then, ride a fixed time then BANK so the machine
+                // loops and the pot glow does not hang on forever.
+                if (surge.active) {
+                    surgeTimerRef.current += dt;
+                    if (surgeTimerRef.current >= SURGE_PLACEHOLDER_SECONDS) {
+                        surge.endSurge("bank");
+                        surgeTimerRef.current = 0;
+                    }
+                }
+                engine!.renderSurge(surge.active ? surge.pot : null);
                 if (s.elapsed >= nextBonusRef.current) {
                     engine!.spawnBonus(catchBonus);
                     scheduleBonus(s.elapsed);
@@ -184,7 +203,14 @@ export function App() {
                     const cutoff = performance.now() - CPS_WINDOW * 1000;
                     clickTimesRef.current = clickTimesRef.current.filter((t) => t > cutoff);
                     setCps(clickTimesRef.current.length / CPS_WINDOW);
-                    setHeat(heatRef.current);
+                    setHeat(surge.heat);
+                    const pot = surge.pot;
+                    setSurgeHud({
+                        active: surge.active,
+                        potValue: pot.value,
+                        multiplier: pot.multiplier,
+                        crits: pot.crits,
+                    });
                     setHud(snapshot(s));
                 }
                 raf = requestAnimationFrame(frame);
@@ -207,16 +233,13 @@ export function App() {
         // aim the eruption at the click position, in host-local (canvas) px.
         const rect = hostRef.current?.getBoundingClientRect();
         const target = rect ? { x: e.clientX - rect.left, y: e.clientY - rect.top } : undefined;
-        if (!frenzyActive(s)) {
-            heatRef.current += HEAT_PER_CLICK;
-            if (heatRef.current >= 100) {
-                heatRef.current = 0;
-                startFrenzy(s);
-                audioRef.current.frenzy();
-            }
-        }
+        // a click fills the heat meter; when it tops out a surge ignites (design §3).
+        const surge = surgeRef.current;
+        if (surge.addHeat(HEAT_PER_CLICK)) audioRef.current.frenzy();
         const r = rollAttack(s, Math.random);
         applyAttack(s, r);
+        // during a surge the click's strike also folds into the pot (design §3).
+        surge.recordStrike(r, baseDamage(s));
         // a manual hit erupts gold too, so clicking feeds the collector like the
         // auto-loop does — essence flows only through the drain, never here. the
         // ballistic eruption arcs from the core to the click (target) and deposits
@@ -243,13 +266,13 @@ export function App() {
         setMuted(audioRef.current.muted);
     };
 
-    const inFrenzy = hud.frenzySeconds > 0;
+    const surging = surgeHud.active;
 
     return (
         <div className="layout">
             <div
                 ref={hostRef}
-                className={inFrenzy ? "stage frenzy" : "stage"}
+                className={surging ? "stage frenzy" : "stage"}
                 onPointerDown={manualAttack}
             />
             <aside className="hud">
@@ -287,17 +310,17 @@ export function App() {
                         </div>
                     )}
                 </div>
-                {inFrenzy ? (
+                {surging ? (
                     <div className="frenzy-banner">
-                        <span className="frenzy-word">FRENZY</span>
-                        <span className="frenzy-x">×{FRENZY_MULTI}</span>
-                        <span className="frenzy-time">{hud.frenzySeconds.toFixed(1)}s</span>
+                        <span className="frenzy-word">SURGE</span>
+                        <span className="frenzy-x">×{surgeHud.multiplier.toFixed(2)}</span>
+                        <span className="frenzy-time">pot {formatNumber(surgeHud.potValue)}</span>
                     </div>
                 ) : (
                     <div className="heat">
                         <div className="heat-label">
                             <span>{cps.toFixed(1)} clicks/s</span>
-                            <span className="heat-hint">click fast → frenzy</span>
+                            <span className="heat-hint">click fast → surge</span>
                         </div>
                         <div className="heat-bar">
                             <div

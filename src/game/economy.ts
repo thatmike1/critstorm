@@ -58,8 +58,6 @@ export interface EconomyState {
     totalDamage: number;
     elapsed: number;
     attackTimer: number;
-    /** seconds of frenzy remaining; all damage is multiplied while > 0 */
-    frenzyTimer: number;
     levels: Record<UpgradeId, number>;
 }
 
@@ -77,29 +75,14 @@ export const MAX_TIER = 8;
 /** payout multiplier for golden hits */
 export const GOLDEN_MULTI = 25;
 
-/** everything hits this much harder during a frenzy */
-export const FRENZY_MULTI = 3;
-
-/** frenzy duration in seconds */
-export const FRENZY_DURATION = 8;
-
 export function createState(): EconomyState {
     return {
         essence: 0,
         totalDamage: 0,
         elapsed: 0,
         attackTimer: 0,
-        frenzyTimer: 0,
         levels: { baseDamage: 0, critChance: 0, critMulti: 0, attackRate: 0, golden: 0 },
     };
-}
-
-export function frenzyActive(s: EconomyState): boolean {
-    return s.frenzyTimer > 0;
-}
-
-export function startFrenzy(s: EconomyState): void {
-    s.frenzyTimer = FRENZY_DURATION;
 }
 
 export function baseDamage(s: EconomyState): number {
@@ -133,7 +116,6 @@ export function rollAttack(s: EconomyState, rng: () => number): AttackResult {
     const golden = rng() < goldenChance(s);
     let damage = baseDamage(s) * Math.pow(critMulti(s), tier);
     if (golden) damage *= GOLDEN_MULTI;
-    if (frenzyActive(s)) damage *= FRENZY_MULTI;
     return { damage, tier, golden };
 }
 
@@ -180,7 +162,6 @@ export function valueToEssence(value: number, fee: number = COLLECTOR_BASE_FEE):
 /** advance time, returning the attacks that fired during dt */
 export function tick(s: EconomyState, dtSec: number, rng: () => number): AttackResult[] {
     s.elapsed += dtSec;
-    s.frenzyTimer = Math.max(0, s.frenzyTimer - dtSec);
     s.attackTimer += dtSec * attacksPerSec(s);
     const results: AttackResult[] = [];
     while (s.attackTimer >= 1) {

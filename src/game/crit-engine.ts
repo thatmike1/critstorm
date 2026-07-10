@@ -4,6 +4,7 @@ import { createWorld, type World } from "./world";
 import { SimLayer } from "./sim-layer";
 import type { Simulation } from "../sim/simulation";
 import { depositEruption } from "./eruption";
+import type { PotState } from "./surge";
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
 const TIER_COLORS = [
@@ -85,6 +86,9 @@ export class CritEngine {
     private simLayer: SimLayer;
     private stage: Container;
     private eruptLayer: Container;
+    private coreGlow: Graphics;
+    private glowPulse = 0;
+    private glowPot: PotState | null = null;
     private flash: Graphics;
     private flashAlpha = 0;
     private pool: Text[] = [];
@@ -112,6 +116,14 @@ export class CritEngine {
         // jitters the arcs relative to the world they land in.
         this.eruptLayer = new Container();
         app.stage.addChild(this.eruptLayer);
+
+        // the surge pot made physical (design §3 / pillar 1): a glow anchored on the
+        // storm core that swells + brightens with the pot instead of the pot being a
+        // bare number. it rides just under the crit numbers, on app.stage so screen
+        // shake never jitters it off the core. hidden until a surge is live.
+        this.coreGlow = new Graphics();
+        this.coreGlow.visible = false;
+        app.stage.addChild(this.coreGlow);
 
         this.stage = new Container();
         app.stage.addChild(this.stage);
@@ -239,6 +251,46 @@ export class CritEngine {
             payout,
             tier,
         });
+    }
+
+    /**
+     * the surge render seam (design §3, pillar 1): make the pot visible as a molten
+     * core that swells + brightens as the pot grows, so the payout reads as matter
+     * rather than a HUD number. pass the live {@link PotState} while surging, or
+     * `null` to extinguish the glow when idle. radius grows sublinearly with the pot
+     * value (log10) and with each crit landed; alpha climbs with the crit count. the
+     * actual draw is redone each frame in {@link update} so the glow can breathe —
+     * this only latches the target pot. VFX polish is out of scope (hkm follow-ups);
+     * this is the load-bearing hook that does something visible.
+     */
+    renderSurge(pot: PotState | null): void {
+        this.glowPot = pot;
+        if (!pot) {
+            this.coreGlow.visible = false;
+            return;
+        }
+        this.coreGlow.visible = true;
+        this.drawCoreGlow(pot);
+    }
+
+    /** redraw the core-glow disc for `pot` at the current breathing pulse. */
+    private drawCoreGlow(pot: PotState): void {
+        const { W, H } = this.world.sim;
+        const sw = this.app.screen.width;
+        const sh = this.app.screen.height;
+        const cx = (this.world.core.x / W) * sw;
+        const cy = (this.world.core.y / H) * sh;
+        // swell sublinearly with the pot value so a jackpot bulges without engulfing
+        // the screen, plus a per-crit bump so each ride visibly grows the core.
+        const swell = Math.log10(1 + Math.max(0, pot.value));
+        const pulse = 1 + Math.sin(this.glowPulse) * 0.08;
+        const radius = (10 + swell * 7 + pot.crits * 3) * pulse;
+        const alpha = Math.min(0.3 + pot.crits * 0.07, 0.9);
+        this.coreGlow.clear();
+        this.coreGlow.circle(0, 0, radius).fill({ color: 0xffb02e, alpha: alpha * 0.5 });
+        this.coreGlow.circle(0, 0, radius * 0.62).fill({ color: 0xffd75e, alpha });
+        this.coreGlow.circle(0, 0, radius * 0.28).fill({ color: 0xffffff, alpha });
+        this.coreGlow.position.set(cx, cy);
     }
 
     /**
@@ -402,6 +454,12 @@ export class CritEngine {
         // sim speed from display refresh. keep it stretched to the (resized) stage.
         this.simLayer.update(dtMs);
         this.simLayer.resize(this.app.screen.width, this.app.screen.height);
+        // breathe the surge core glow each frame so the pot reads as living molten
+        // matter; only redraws while a pot is latched (design §3 render seam).
+        if (this.glowPot) {
+            this.glowPulse += dt * 6;
+            this.drawCoreGlow(this.glowPot);
+        }
         for (let i = this.active.length - 1; i >= 0; i--) {
             const c = this.active[i];
             c.life += dtMs;
