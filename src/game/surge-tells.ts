@@ -48,8 +48,12 @@ export const TELL_LADDER: readonly TellRung[] = [
     { name: "gold-shimmer", minLoad: 0.82, heatTarget: 260 }, // still < GOLD melt (300)
 ] as const;
 
-/** coreLoad at which the render-side gold shimmer begins to ramp in (design §3). */
-export const GOLD_SHIMMER_START = 0.6;
+/**
+ * coreLoad at which the render-side gold shimmer begins to ramp in (design §3). anchored
+ * to the gold-shimmer rung's `minLoad` so the shimmer only appears once that final rung is
+ * active — never before oil-flash (0.68) — keeping the fixed ice→water→plant→oil→gold order.
+ */
+export const GOLD_SHIMMER_START = 0.82;
 
 /** coreLoad at which the gold shimmer reaches full intensity — the melt edge. */
 export const GOLD_SHIMMER_FULL = 1;
