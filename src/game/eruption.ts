@@ -37,6 +37,54 @@ export function eruptionValuePerCell(payout: number): number {
     return payout / eruptionMass(payout);
 }
 
+// the BANK spectacle (design §3): banking erupts the WHOLE pot as a mountain, not a
+// single blob. routing the pot through one per-strike eruption clamps its mass at
+// MAX_ERUPTION_CELLS, so the payoff read as a modest blob (critstorm-724). instead a
+// bank is a VOLLEY: the pot is split across several ballistic bursts that rain onto
+// the core over ~1s, and each burst deposits its share via {@link depositEruption}.
+// total mass is therefore the SUM of the per-burst masses — a far bigger, denser
+// mountain than the single-eruption cap — yet still bounded (each share is smaller so
+// its own mass stays clamped) and sublinear in pot value, so a lava-floor worst case
+// (≤ BANK_MAX_BURSTS · MAX_ERUPTION_CELLS molten cells) never drowns the sim (§6).
+
+/** fewest bursts a bank volley rains, so even a trivial pot lands as a real pile. */
+export const BANK_MIN_BURSTS = 5;
+/** most bursts a bank volley rains. bounds worst-case molten mass at
+ * `BANK_MAX_BURSTS · MAX_ERUPTION_CELLS` cells so late-game banks hold 60fps (§6). */
+export const BANK_MAX_BURSTS = 12;
+
+/**
+ * bursts a bank volley of pot `P` rains: `clamp(round(5 + 2·log10(P)), 5, 12)`. grows
+ * with log(P) so a fatter pot rains a longer, denser volley, clamped so the mass
+ * budget stays bounded. a non-positive pot has nothing to bank → the floor.
+ */
+export function bankBurstCount(payout: number): number {
+    if (!(payout > 0)) return BANK_MIN_BURSTS;
+    const n = Math.round(BANK_MIN_BURSTS + 2 * Math.log10(payout));
+    return Math.max(BANK_MIN_BURSTS, Math.min(BANK_MAX_BURSTS, n));
+}
+
+/**
+ * split pot `P` into `bursts` value shares that sum to EXACTLY `P`. every burst gets
+ * `P/bursts` except the last, which carries the remainder, so float division can
+ * neither leak nor mint value — the bank half of the conservation contract (§4.1):
+ * `sum(shares) === P`, and each share then conserves through {@link depositEruption}.
+ * a non-positive pot or burst count yields no bursts.
+ */
+export function bankVolleyShares(payout: number, bursts: number): number[] {
+    if (!(payout > 0) || bursts <= 0) return [];
+    const share = payout / bursts;
+    const shares: number[] = [];
+    let assigned = 0;
+    for (let i = 0; i < bursts - 1; i++) {
+        shares.push(share);
+        assigned += share;
+    }
+    // last burst absorbs the exact remainder so the volley sums back to P.
+    shares.push(payout - assigned);
+    return shares;
+}
+
 /**
  * `count` grid offsets forming a compact blob around the origin, nearest-first.
  * an eruption's molten cells cluster tightly at the impact point instead of

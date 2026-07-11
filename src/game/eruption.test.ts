@@ -7,8 +7,12 @@ import { COLLECTOR_BASE_FEE } from "./economy";
 import type { AttackResult } from "./economy";
 import { Surge } from "./surge";
 import {
+    BANK_MAX_BURSTS,
+    BANK_MIN_BURSTS,
     MAX_ERUPTION_CELLS,
     MIN_ERUPTION_CELLS,
+    bankBurstCount,
+    bankVolleyShares,
     blobOffsets,
     depositEruption,
     eruptionMass,
@@ -277,5 +281,124 @@ describe("surge → bank → collect conserves value end-to-end (de-dup pin, hkm
         // conservation: collected(=essence/(1−fee)) + remaining(=0) + lost(=0) === pot.
         expectClose(essence, pot.value * (1 - COLLECTOR_BASE_FEE));
         expect(world.sim.totalValue()).toBeCloseTo(0, 4);
+    });
+});
+
+// the BANK VOLLEY mass/value path (critstorm-724). the fix: banking no longer routes
+// the whole pot through one per-strike eruption (mass capped at MAX_ERUPTION_CELLS,
+// which read as a modest blob) — the pot is split into a volley of bursts that rain a
+// mountain. CritEngine.eruptBank drives the ballistic timing (a Pixi visual); these
+// tests pin the grid-truth: the burst split, and that composing the shares through
+// depositEruption conserves the pot exactly while piling far more mass than a single
+// eruption could. `bankVolleyDeposit` mirrors the grid side of eruptBank.
+
+/** deposit a bank volley of `payout` around (cx,cy) the way {@link eruptBank} does at
+ * the grid level: split into bursts, deposit each share as MOLTEN_GOLD near the core.
+ * returns the total deposited value. scatter is deterministic here (a small ring) so
+ * the conservation assertion doesn't depend on the engine's Math.random jitter. */
+function bankVolleyDeposit(sim: Simulation, cx: number, cy: number, payout: number): number {
+    const bursts = bankBurstCount(payout);
+    const shares = bankVolleyShares(payout, bursts);
+    let total = 0;
+    shares.forEach((share, i) => {
+        const angle = (i / bursts) * Math.PI * 2;
+        const gx = Math.round(cx + Math.cos(angle) * 3);
+        const gy = Math.round(cy + Math.sin(angle) * 3);
+        total += depositEruption(sim, gx, gy, share);
+    });
+    return total;
+}
+
+describe("bankBurstCount — clamp(round(5 + 2·log10(P)), 5, 12)", () => {
+    it("floors tiny pots and ceils fat pots", () => {
+        expect(bankBurstCount(1)).toBe(BANK_MIN_BURSTS); // 5 + 0
+        expect(bankBurstCount(10)).toBe(7); // 5 + 2
+        expect(bankBurstCount(100)).toBe(9); // 5 + 4
+        expect(bankBurstCount(1e9)).toBe(BANK_MAX_BURSTS); // 5 + 18 → clamp down
+    });
+
+    it("floors a non-positive pot instead of returning NaN", () => {
+        expect(bankBurstCount(0)).toBe(BANK_MIN_BURSTS);
+        expect(bankBurstCount(-5)).toBe(BANK_MIN_BURSTS);
+    });
+
+    it("is monotonic non-decreasing and always within [MIN, MAX]", () => {
+        let prev = 0;
+        for (const p of [1, 10, 100, 1_000, 1e5, 1e8, 1e11]) {
+            const n = bankBurstCount(p);
+            expect(n).toBeGreaterThanOrEqual(prev);
+            expect(n).toBeGreaterThanOrEqual(BANK_MIN_BURSTS);
+            expect(n).toBeLessThanOrEqual(BANK_MAX_BURSTS);
+            prev = n;
+        }
+    });
+});
+
+describe("bankVolleyShares — the pot splits into shares that sum to exactly P", () => {
+    it("returns `bursts` shares that sum back to the pot (no leak, no mint)", () => {
+        for (const p of [1, 660, 1_234, 5e6, 9.9e9]) {
+            const bursts = bankBurstCount(p);
+            const shares = bankVolleyShares(p, bursts);
+            expect(shares).toHaveLength(bursts);
+            const sum = shares.reduce((a, s) => a + s, 0);
+            expectClose(sum, p);
+        }
+    });
+
+    it("gives the remainder to the last burst so equal division never drifts", () => {
+        // 100 / 3 is non-terminating in binary: the last share must absorb the drift.
+        const shares = bankVolleyShares(100, 3);
+        expect(shares).toHaveLength(3);
+        expectClose(
+            shares.reduce((a, s) => a + s, 0),
+            100
+        );
+    });
+
+    it("is empty for a non-positive pot or burst count", () => {
+        expect(bankVolleyShares(0, 8)).toHaveLength(0);
+        expect(bankVolleyShares(-5, 8)).toHaveLength(0);
+        expect(bankVolleyShares(1_000, 0)).toHaveLength(0);
+    });
+});
+
+describe("BANK volley deposit — conserves the pot AND piles a bigger mountain", () => {
+    const W = 96;
+    const H = 72;
+
+    it("deposits exactly the pot value across the whole volley (conservation)", () => {
+        for (const potValue of [660, 12_345, 5e8]) {
+            const sim = new Simulation(W, H);
+            const deposited = bankVolleyDeposit(sim, 48, 30, potValue);
+            expectClose(deposited, potValue);
+            expectClose(sim.totalValue(), potValue);
+        }
+    });
+
+    it("piles more molten mass than a single per-strike eruption of the same pot", () => {
+        // the core of critstorm-724: a mid pot through one eruption clamps to a modest
+        // blob; the volley sums many bursts' masses into a real mountain. compare the
+        // molten-cell count of the volley against one eruption of the whole pot.
+        const potValue = 4_000; // eruptionMass(4000) ≈ 26 cells for one eruption
+        const single = new Simulation(W, H);
+        depositEruption(single, 48, 30, potValue);
+        const volley = new Simulation(W, H);
+        bankVolleyDeposit(volley, 48, 30, potValue);
+        const countMolten = (sim: Simulation): number => {
+            let n = 0;
+            for (let i = 0; i < sim.cells.length; i++) if (sim.cells[i] === Mat.MOLTEN_GOLD) n++;
+            return n;
+        };
+        expect(countMolten(volley)).toBeGreaterThan(countMolten(single));
+    });
+
+    it("keeps worst-case molten mass bounded (≤ MAX_BURSTS · MAX_ERUPTION_CELLS)", () => {
+        // a jackpot pot must not drown the sim: the volley's mass budget is bounded so
+        // a lava-floor worst case still holds 60fps (design §6).
+        const sim = new Simulation(200, 150);
+        bankVolleyDeposit(sim, 100, 75, 1e11);
+        let molten = 0;
+        for (let i = 0; i < sim.cells.length; i++) if (sim.cells[i] === Mat.MOLTEN_GOLD) molten++;
+        expect(molten).toBeLessThanOrEqual(BANK_MAX_BURSTS * MAX_ERUPTION_CELLS);
     });
 });
