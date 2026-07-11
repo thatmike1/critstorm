@@ -146,6 +146,24 @@ export function applyAttack(s: EconomyState, r: AttackResult): void {
     s.totalDamage += r.damage;
 }
 
+/** the essence-per-core scale in the core formula (design §5): `cores = floor(sqrt(banked / 500))`. */
+export const CORE_ESSENCE_SCALE = 500;
+
+/**
+ * storm cores earned from an amount of banked essence (design §5):
+ * `cores = floor(sqrt(bankedEssence / 500))`. `bankedEssence` is the CUMULATIVE
+ * essence collected this storm — spending essence on in-storm upgrades does NOT
+ * reduce it, so this is always monotone in a storm's collected total. one shared
+ * formula so the tuning harness and the future meta layer (critstorm-gen.1) agree
+ * on the same sqrt curve; the ×1.5 bank-out bonus applies to the result of this,
+ * after the sqrt (design §5), and is not modelled here.
+ * @param bankedEssence cumulative essence collected this storm; negatives floor to 0.
+ */
+export function coresFromEssence(bankedEssence: number): number {
+    if (!(bankedEssence > 0)) return 0;
+    return Math.floor(Math.sqrt(bankedEssence / CORE_ESSENCE_SCALE));
+}
+
 /** base collector fee: the fraction of arriving gold value skimmed on conversion (design §4.3/§6). */
 export const COLLECTOR_BASE_FEE = 0.3;
 

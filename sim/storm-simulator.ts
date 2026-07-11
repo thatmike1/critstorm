@@ -14,6 +14,7 @@
 import {
     buy,
     canBuy,
+    coresFromEssence,
     createState,
     critChance,
     critMulti,
@@ -22,6 +23,7 @@ import {
     tick,
     upgradeCost,
     UPGRADES,
+    valueToEssence,
     type AttackResult,
     type EconomyState,
     type UpgradeId,
@@ -53,6 +55,15 @@ export interface StormConfig {
 export interface MinuteSample {
     minute: number;
     essence: number;
+    /**
+     * cumulative essence collected by this minute — the sum of every frame's
+     * collector conversion, never reduced by spending (design §5). this is the
+     * `bankedEssence` the storm-core formula reads, and the series the §6
+     * anti-farming assertion tracks across the 8→35 min arc.
+     */
+    cumulativeEssence: number;
+    /** storm cores this cumulative essence would mint: {@link coresFromEssence}. */
+    cores: number;
     dps: number;
     totalDamage: number;
     critPct: number;
@@ -68,6 +79,10 @@ export interface StormSummary {
     seed: number;
     durationSec: number;
     finalEssence: number;
+    /** total essence collected across the whole storm (design §5 `bankedEssence`). */
+    cumulativeEssence: number;
+    /** storm cores the run banked out: {@link coresFromEssence} of {@link cumulativeEssence}. */
+    cores: number;
     totalDamage: number;
     finalDps: number;
     attacks: number;
@@ -79,6 +94,70 @@ export interface StormSummary {
     busts: number;
     rank: string;
     samples: MinuteSample[];
+}
+
+/**
+ * advance one frame of the pure in-storm economy: roll the frame's attacks, credit
+ * the collected essence (design §4.3, whole-payout at the base fee — see the run
+ * loop), then greedy-buy one upgrade. returns the attacks rolled and the essence
+ * collected this frame. the physical sim never touches essence, so the §6
+ * anti-farming trajectory ({@link cumulativeEssenceAtMinutes}) runs this alone,
+ * while {@link StormSimulator} wraps it with the sim strikes/steps and sampling.
+ */
+export function stepEconomy(
+    economy: EconomyState,
+    stepSec: number,
+    rng: Rng
+): { attacks: AttackResult[]; collected: number } {
+    const attacks = tick(economy, stepSec, rng);
+    let frameDamage = 0;
+    for (const r of attacks) frameDamage += r.damage;
+    const collected = valueToEssence(frameDamage);
+    economy.essence += collected;
+    const id = greedyBuy(economy);
+    if (id) buy(economy, id);
+    return { attacks, collected };
+}
+
+/**
+ * the cumulative-essence trajectory of a storm's economy for a seed, sampled at the
+ * requested minute marks (design §5 `bankedEssence`). this is the sim-free economic
+ * core the §6 anti-farming assertion reads: it reproduces exactly the economy stream
+ * of a full {@link StormSimulator} run (same seed → same `mulberry32` roll stream),
+ * minus the physical sim that does not affect essence, so many long storms can be
+ * swept cheaply.
+ * @param seed the economy seed; matches {@link StormSimulator}'s economy stream.
+ * @param minutes the minute marks to record cumulative essence at (any order).
+ * @param stepSec fixed timestep; defaults to {@link DEFAULT_STEP_SEC}.
+ * @returns a map from each requested minute to cumulative essence collected by then.
+ */
+export function cumulativeEssenceAtMinutes(
+    seed: number,
+    minutes: readonly number[],
+    stepSec: number = DEFAULT_STEP_SEC
+): Map<number, number> {
+    const rng = mulberry32(seed | 0);
+    const economy = createState();
+    // targets in seconds, ascending; supports fractional-minute marks (e.g. the
+    // 90 s first-surge mark) as well as the whole-minute arc.
+    const targets = [...new Set(minutes)].sort((a, b) => a - b).map((m) => ({ m, sec: m * 60 }));
+    // +2 frames of buffer so the last target's second is strictly crossed despite
+    // float accumulation of the 0.05 s step — otherwise it can fall a rounding
+    // epsilon short and never sample.
+    const totalFrames = Math.round((targets[targets.length - 1].sec / stepSec) | 0) + 2;
+    const out = new Map<number, number>();
+    let cumulative = 0;
+    let ti = 0;
+    // mirror StormSimulator.runInner: credit the frame first, then record any mark the
+    // frame just crossed, so a whole-minute mark's total matches a real run's MinuteSample.
+    for (let frame = 0; frame < totalFrames && ti < targets.length; frame++) {
+        cumulative += stepEconomy(economy, stepSec, rng).collected;
+        while (ti < targets.length && economy.elapsed >= targets[ti].sec) {
+            out.set(targets[ti].m, cumulative);
+            ti++;
+        }
+    }
+    return out;
 }
 
 /** greedy: buy the affordable upgrade with the best dps gain per essence spent */
@@ -143,23 +222,28 @@ export class StormSimulator {
         let goldenHits = 0;
         let banks = 0;
         let busts = 0;
+        // cumulative essence collected this storm. the economy state's own `essence`
+        // is the spendable balance (greedy draws it down); this ledger is the design
+        // §5 `bankedEssence` — collected minus nothing — and drives the core count.
+        let cumulativeEssence = 0;
 
         const samples: MinuteSample[] = [];
         let nextSampleAt = 0;
 
         const totalFrames = Math.round(durationSec / stepSec);
         for (let frame = 0; frame < totalFrames; frame++) {
-            const results = tick(economy, stepSec, this.economyRng);
+            // one economy frame: roll attacks, credit collected essence (design §4.3 —
+            // a competent bot routes its whole payout to the collector, minted at the
+            // base fee; the headless harness has no spatial routing), greedy-buy once.
+            // this is the essence source that makes the in-storm economy compound
+            // (attackRate → crit → multi) instead of sitting at zero.
+            const { attacks: results, collected } = stepEconomy(economy, stepSec, this.economyRng);
+            cumulativeEssence += collected;
             this.tally(results, (r) => {
                 attacks++;
                 if (r.tier > 0) crits++;
                 if (r.golden) goldenHits++;
             });
-
-            // spend down essence with the greedy policy (one purchase per frame,
-            // matching the original sim's cadence).
-            const id = greedyBuy(economy);
-            if (id) buy(economy, id);
 
             // fire at most one physical strike per frame for the most notable
             // crit, so coreTemp reflects storm intensity without unbounded work.
@@ -185,7 +269,7 @@ export class StormSimulator {
             }
 
             if (economy.elapsed >= nextSampleAt) {
-                samples.push(sample(economy, sim.heat[coreIdx], nextSampleAt));
+                samples.push(sample(economy, sim.heat[coreIdx], nextSampleAt, cumulativeEssence));
                 nextSampleAt += 60;
             }
         }
@@ -195,6 +279,8 @@ export class StormSimulator {
             seed: this.cfg.seed,
             durationSec,
             finalEssence: economy.essence,
+            cumulativeEssence,
+            cores: coresFromEssence(cumulativeEssence),
             totalDamage: economy.totalDamage,
             finalDps: expectedDps(economy),
             attacks,
@@ -224,10 +310,17 @@ function pickNotable(results: AttackResult[]): AttackResult | null {
 }
 
 /** build a per-minute sample row from the current state */
-function sample(economy: EconomyState, coreTemp: number, atSec: number): MinuteSample {
+function sample(
+    economy: EconomyState,
+    coreTemp: number,
+    atSec: number,
+    cumulativeEssence: number
+): MinuteSample {
     return {
         minute: Math.round(atSec / 60),
         essence: economy.essence,
+        cumulativeEssence,
+        cores: coresFromEssence(cumulativeEssence),
         dps: expectedDps(economy),
         totalDamage: economy.totalDamage,
         critPct: critChance(economy) * 100,

@@ -35,7 +35,12 @@ export const SURGE_TIER_FLOOR = 1;
  * on purpose — the Aegis meta track raises it later so deep rides become survivable;
  * a host can override it per-surge through {@link SurgeOptions.criticalTemp}.
  */
-export const CORE_CRITICAL_TEMP = 490;
+// tuned to 620 for the wave-5b pacing pass (critstorm-4cz.3): with the base 490 the
+// undefended full-ride EV crossover sat at n=4, short of the §3 target of n≈6. raising
+// the ceiling gives the extra headroom the ride needs to reach ~6 crits before the
+// hazard cliff, without changing any surge mechanic. still below lava's 700 emit temp
+// (§6), so the thermal anchoring holds, and Aegis raises it further from here.
+export const CORE_CRITICAL_TEMP = 620;
 
 /**
  * ambient-ramp coefficient `q` (design §3/§6): surge time adds `+q·n²` heat per
@@ -43,7 +48,12 @@ export const CORE_CRITICAL_TEMP = 490;
  * heat only ever climbs, so a player cannot wait out a hot core; the quadratic in
  * `n` means the longer/deeper you have ridden, the faster sitting still cooks you.
  */
-export const AMBIENT_HEAT_COEFF = 0.15;
+// tuned 0.15 -> 0.10 for the wave-5b pacing pass (critstorm-4cz.3): at the base 0.15 the
+// quadratic ambient wait-toll dominated the low-crit fresh-economy ride and cooked the
+// core before n≈6 (the "slow drag" a deep ride felt like). trimming it 33% keeps the
+// deterministic anti-stall clock — ~46% of undefended busts are still ambient — while the
+// bust becomes a sharp hazard cliff around n=6 rather than a slow cook.
+export const AMBIENT_HEAT_COEFF = 0.1;
 
 /**
  * per-tier crit heat-spike bands `[min, max]`, indexed by crit tier and anchored to

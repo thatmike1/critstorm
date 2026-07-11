@@ -18,30 +18,25 @@ import {
 // statistical samples. trial counts are kept small enough that the whole file
 // runs in well under a second.
 //
-// WHAT "CROSSOVER" MEANS HERE (read before treating n=4 as a constants miss):
-// §3/§6 phrase the target as P(bust on the next CRIT). this harness instead
-// measures P(bust on the next full RIDE) — the crit spike PLUS the ambient heat
-// accrued while the player waits for that crit to land. that is a deliberate,
-// arguably more EV-correct definition (you cannot ride to n+1 without eating the
-// wait), but it is a DIFFERENT quantity, and it is sensitive to how long the
-// wait is: these trials assume the fixed ~1-attack/sec fresh-economy cadence
-// (attacksPerSec, no simulated clicking). faster clicking shortens the wait,
-// lowers the ambient toll, and pushes the crossover back out.
+// WHAT "CROSSOVER" MEANS HERE: §3/§6 phrase the target as P(bust on the next
+// CRIT). this harness measures P(bust on the next full RIDE) — the crit spike PLUS
+// the ambient heat accrued while the player waits for that crit to land. that is the
+// EV-correct quantity (you cannot ride to n+1 without eating the wait), and it is
+// sensitive to the wait length: these trials assume the fixed ~1-attack/sec fresh
+// undefended cadence (attacksPerSec, no simulated clicking). faster clicking shortens
+// the wait, lowers the ambient toll, and pushes the crossover out further.
 //
-// MEASURED-vs-DESIGN GAP (owned by critstorm-4cz.3, the pacing tune — NOT this
-// harness, whose job is to measure and pin, not retune): with the shipped
-// CRIT_SPIKE_BANDS / CORE_CRITICAL_TEMP=490 / AMBIENT_HEAT_COEFF=0.15, the
-// full-RIDE crossover on a fresh undefended economy lands at n=4, not the §3
-// target of n≈6. the crit-spike hazard alone crosses 1/3 at n=6 (on target); it
-// is the quadratic ambient ramp (+q·n²/s) that, at the low fresh-economy crit
-// cadence, cooks the core early and pulls the full-ride crossover down to n=4.
-// this stays in [4,5] across the whole crit-chance range and never reaches 6
-// while ambient is on. so the 4cz.3 owner has TWO levers, and should choose
-// consciously: (a) accept full-ride hazard (crit + wait) as the crossover
-// definition — then this is a modelling choice, not a pure constants miss — or
-// (b) retune the bands/coefficient (and/or the assumed cadence) to move the
-// full-ride peak back out to n≈6. the tests below assert the MEASURED n=4 and
-// flag the gap, so the suite stays honest and green either way.
+// WAVE-5B PACING TUNE (critstorm-4cz.3, resolved): the pre-tune constants
+// (CORE_CRITICAL_TEMP=490 / AMBIENT_HEAT_COEFF=0.15) put the full-RIDE crossover at
+// n=4 — two crits short of the §3 target n≈6 — because the quadratic ambient ramp
+// cooked the low-cadence ride early. of the two levers the harness flagged, we took
+// (b), the retune, over (a), redefining the target: crit-spike magnitude is the WRONG
+// direction (sharper spikes move the crossover EARLIER), so reaching n≈6 needs
+// headroom + a lighter wait toll, not sharper spikes. we raised CORE_CRITICAL_TEMP to
+// 620 and trimmed AMBIENT_HEAT_COEFF to 0.10 (a 33% cut, not off — ~46% of undefended
+// busts stay ambient, so the anti-stall clock still bites and the ride is a sharp
+// n≈6 cliff, not a slow cook). the tests below now assert the on-target n=6 for both
+// the EV peak and the 1/3 hazard crossover; drift in the surge heat model trips them.
 
 /** fresh undefended economy, fixed seed base — the design "no defenses" reference. */
 const REF: SweepConfig = { trials: 3000, seedBase: 1234 };
@@ -108,19 +103,20 @@ describe("surge harness — bank/ride EV (design.md §3/§6)", () => {
     });
 
     it("EV rises with bank depth up to the crossover, then collapses on greed", () => {
-        const ev = Array.from({ length: 7 }, (_, n) => expectedBankedEssence(bankAtN, n, REF));
-        // strictly increasing while riding is still cheap (n = 1..4)…
-        for (let n = 2; n <= 4; n++) expect(ev[n]).toBeGreaterThan(ev[n - 1]);
-        // …then greed detonates the pot: banking at 6 is far worse than at the peak.
-        expect(ev[6]).toBeLessThan(ev[4] * 0.5);
+        const ev = Array.from({ length: 9 }, (_, n) => expectedBankedEssence(bankAtN, n, REF));
+        // strictly increasing while riding is still cheap (n = 1..6)…
+        for (let n = 2; n <= 6; n++) expect(ev[n]).toBeGreaterThan(ev[n - 1]);
+        // …then greed detonates the pot: banking at 7 is far worse than at the peak.
+        expect(ev[7]).toBeLessThan(ev[6] * 0.5);
     });
 
-    it("[MEASURED, design gap] EV-maximizing bank point lands at n=4 (§3 targets n≈6)", () => {
-        // TODO(critstorm-4cz.3): retune CRIT_SPIKE_BANDS / AMBIENT_HEAT_COEFF so the
-        // EV peak moves out to n≈6 undefended. pinned to the measured value here so a
-        // regression in the surge math is caught; this harness does not retune.
+    it("the EV-maximizing bank point lands at n≈6 (design §3)", () => {
+        // wave-5b pacing tune (critstorm-4cz.3): with CORE_CRITICAL_TEMP=620 and
+        // AMBIENT_HEAT_COEFF=0.10 the undefended full-ride EV peak sits at n=6, on the
+        // §3 target — up from the pre-tune n=4, where the 490 ceiling and 0.15 ambient
+        // toll cooked the ride two crits early.
         const ev = Array.from({ length: 9 }, (_, n) => expectedBankedEssence(bankAtN, n, REF));
-        expect(evArgmax(ev)).toBe(4);
+        expect(evArgmax(ev)).toBe(6);
     });
 });
 
@@ -144,15 +140,16 @@ describe("surge harness — bust hazard shape (design.md §6)", () => {
         expect(haz[crossover]).toBeGreaterThan(EV_BREAKEVEN);
     });
 
-    it("[MEASURED, design gap] the 1/3 crossover lands at n=4 (§3 targets n≈6)", () => {
+    it("the 1/3 full-ride crossover lands at n≈6 (design §3)", () => {
         // this is P(bust on the next full RIDE) — crit spike PLUS the ambient heat
-        // accrued waiting for that crit at the ~1-attack/sec fresh cadence — not §3's
-        // bare P(bust on the next CRIT). TODO(critstorm-4cz.3): the crit-spike hazard
-        // alone crosses 1/3 at n=6 (on target); the ambient wait toll pulls the
-        // full-ride crossover down to n=4. the pacing tune owns moving it back out (or
-        // consciously accepting the full-ride definition). pinned to the measured
-        // value so any drift in the surge heat model trips this test.
+        // accrued waiting for that crit at the ~1-attack/sec fresh cadence — the §3
+        // gamble the player actually faces (you cannot reach n+1 without eating the
+        // wait). wave-5b pacing tune (critstorm-4cz.3) moved it from the pre-tune n=4
+        // to the target n=6 by raising CORE_CRITICAL_TEMP to 620 (more headroom) and
+        // trimming AMBIENT_HEAT_COEFF to 0.10 (33% less wait toll — the anti-stall
+        // clock still bites, ~46% of undefended busts stay ambient). the result is a
+        // sharp cliff: haz[5]≈0.26 (still cheap), haz[6]≈0.83 (a coin-flip-plus bust).
         const haz = bustHazardCurve(alwaysRide, MAX_N, REF);
-        expect(hazardCrossover(haz)).toBe(4);
+        expect(hazardCrossover(haz)).toBe(6);
     });
 });

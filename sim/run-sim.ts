@@ -109,22 +109,24 @@ function printStorm(summary: StormSummary): void {
         `storm  strategy=${summary.strategy}  seed=${summary.seed}  duration=${summary.durationSec}s`
     );
     console.log(
-        "min | essence   | dps       | crit%  | multi | core°  | rank      | levels (c/m/r/g)"
+        "min | cumEssence| cores | dps       | crit%  | multi | core°  | rank      | levels (c/m/r/g)"
     );
     console.log(
-        "----|-----------|-----------|--------|-------|--------|-----------|------------------"
+        "----|-----------|-------|-----------|--------|-------|--------|-----------|------------------"
     );
     for (const s of summary.samples) {
         const l = s.levels;
         const levels = `${l.critChance}/${l.critMulti}/${l.attackRate}/${l.golden}`;
         console.log(
-            `${String(s.minute).padStart(3)} | ${formatNumber(s.essence).padStart(9)} | ${formatNumber(s.dps).padStart(9)} | ${s.critPct.toFixed(1).padStart(5)}% | ${s.multi.toFixed(1).padStart(5)} | ${s.coreTemp.toFixed(0).padStart(6)} | ${s.rank.padEnd(9)} | ${levels}`
+            `${String(s.minute).padStart(3)} | ${formatNumber(s.cumulativeEssence).padStart(9)} | ${String(s.cores).padStart(5)} | ${formatNumber(s.dps).padStart(9)} | ${s.critPct.toFixed(1).padStart(5)}% | ${s.multi.toFixed(1).padStart(5)} | ${s.coreTemp.toFixed(0).padStart(6)} | ${s.rank.padEnd(9)} | ${levels}`
         );
     }
 
     console.log("\n--- storm summary ---");
     console.log(`rank           : ${summary.rank}`);
     console.log(`total damage   : ${formatNumber(summary.totalDamage)}`);
+    console.log(`cum essence    : ${formatNumber(summary.cumulativeEssence)}`);
+    console.log(`storm cores    : ${summary.cores}`);
     console.log(`final essence  : ${formatNumber(summary.finalEssence)}`);
     console.log(`final dps      : ${formatNumber(summary.finalDps)}`);
     console.log(`attacks        : ${summary.attacks}`);
