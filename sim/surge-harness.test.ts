@@ -18,16 +18,30 @@ import {
 // statistical samples. trial counts are kept small enough that the whole file
 // runs in well under a second.
 //
+// WHAT "CROSSOVER" MEANS HERE (read before treating n=4 as a constants miss):
+// §3/§6 phrase the target as P(bust on the next CRIT). this harness instead
+// measures P(bust on the next full RIDE) — the crit spike PLUS the ambient heat
+// accrued while the player waits for that crit to land. that is a deliberate,
+// arguably more EV-correct definition (you cannot ride to n+1 without eating the
+// wait), but it is a DIFFERENT quantity, and it is sensitive to how long the
+// wait is: these trials assume the fixed ~1-attack/sec fresh-economy cadence
+// (attacksPerSec, no simulated clicking). faster clicking shortens the wait,
+// lowers the ambient toll, and pushes the crossover back out.
+//
 // MEASURED-vs-DESIGN GAP (owned by critstorm-4cz.3, the pacing tune — NOT this
 // harness, whose job is to measure and pin, not retune): with the shipped
 // CRIT_SPIKE_BANDS / CORE_CRITICAL_TEMP=490 / AMBIENT_HEAT_COEFF=0.15, the
-// full-system crossover on a fresh undefended economy lands at n=4, not the §3
+// full-RIDE crossover on a fresh undefended economy lands at n=4, not the §3
 // target of n≈6. the crit-spike hazard alone crosses 1/3 at n=6 (on target); it
 // is the quadratic ambient ramp (+q·n²/s) that, at the low fresh-economy crit
-// cadence, cooks the core early and pulls the crossover down to n=4. this stays
-// in [4,5] across the whole crit-chance range and never reaches 6 while ambient
-// is on. the tests below assert the MEASURED n=4 and flag the gap, so the suite
-// stays honest and green until 4cz.3 retunes the bands/coefficient.
+// cadence, cooks the core early and pulls the full-ride crossover down to n=4.
+// this stays in [4,5] across the whole crit-chance range and never reaches 6
+// while ambient is on. so the 4cz.3 owner has TWO levers, and should choose
+// consciously: (a) accept full-ride hazard (crit + wait) as the crossover
+// definition — then this is a modelling choice, not a pure constants miss — or
+// (b) retune the bands/coefficient (and/or the assumed cadence) to move the
+// full-ride peak back out to n≈6. the tests below assert the MEASURED n=4 and
+// flag the gap, so the suite stays honest and green either way.
 
 /** fresh undefended economy, fixed seed base — the design "no defenses" reference. */
 const REF: SweepConfig = { trials: 3000, seedBase: 1234 };
@@ -131,10 +145,13 @@ describe("surge harness — bust hazard shape (design.md §6)", () => {
     });
 
     it("[MEASURED, design gap] the 1/3 crossover lands at n=4 (§3 targets n≈6)", () => {
-        // TODO(critstorm-4cz.3): the crit-spike hazard alone crosses 1/3 at n=6 (on
-        // target); the ambient ramp pulls the full-system crossover down to n=4. the
-        // pacing tune owns moving this back out. pinned to the measured value so any
-        // drift in the surge heat model trips this test.
+        // this is P(bust on the next full RIDE) — crit spike PLUS the ambient heat
+        // accrued waiting for that crit at the ~1-attack/sec fresh cadence — not §3's
+        // bare P(bust on the next CRIT). TODO(critstorm-4cz.3): the crit-spike hazard
+        // alone crosses 1/3 at n=6 (on target); the ambient wait toll pulls the
+        // full-ride crossover down to n=4. the pacing tune owns moving it back out (or
+        // consciously accepting the full-ride definition). pinned to the measured
+        // value so any drift in the surge heat model trips this test.
         const haz = bustHazardCurve(alwaysRide, MAX_N, REF);
         expect(hazardCrossover(haz)).toBe(4);
     });
