@@ -6,6 +6,8 @@ import type { Simulation } from "../sim/simulation";
 import { depositEruption } from "./eruption";
 import { bustPot } from "./bust";
 import type { PotState } from "./surge";
+import { DrainMarker } from "./drain-marker";
+import type { CollectorRegion } from "./collector";
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
 const TIER_COLORS = [
@@ -93,6 +95,7 @@ export class CritEngine {
     private simLayer: SimLayer;
     private stage: Container;
     private eruptLayer: Container;
+    private drainMarker: DrainMarker;
     private coreGlow: Graphics;
     private glowPulse = 0;
     private glowPot: PotState | null = null;
@@ -117,6 +120,14 @@ export class CritEngine {
         this.simLayer = new SimLayer(this.world.sim);
         this.simLayer.resize(app.screen.width, app.screen.height);
         app.stage.addChild(this.simLayer.sprite);
+
+        // the collector drain tell (design pillar 4): a dim grate/glow strip over the
+        // sim but under the eruptions, so gold landing on the drain has a visible sink
+        // instead of vanishing (which playtests read as a bug). added right after the
+        // sim sprite so it layers above the world yet below every arc, number, and
+        // flash. on app.stage so screen shake never jitters it off the drain rect.
+        this.drainMarker = new DrainMarker();
+        app.stage.addChild(this.drainMarker.gfx);
 
         // eruption projectiles ride above the world but below the crit numbers +
         // flash. it lives on app.stage (not this.stage) so screen shake never
@@ -158,6 +169,23 @@ export class CritEngine {
     /** the headless falling-sand simulation backing the storm world. */
     get simulation(): Simulation {
         return this.world.sim;
+    }
+
+    /**
+     * bind the collector's drain rect so the on-screen grate marks where gold is
+     * caught (design pillar 4). the region is in grid cells; the marker scales it to
+     * the stretched stage each frame. call once after the collector is built.
+     */
+    setDrainRegion(region: CollectorRegion): void {
+        this.drainMarker.setRegion(region, this.world.sim.W, this.world.sim.H);
+    }
+
+    /**
+     * pulse the drain marker: the collector converted gold to essence this frame, so
+     * flare the grate + bloom upward, making income read as coming FROM the drain.
+     */
+    pulseDrain(): void {
+        this.drainMarker.collected();
     }
 
     static async create(host: HTMLElement): Promise<CritEngine> {
@@ -497,6 +525,9 @@ export class CritEngine {
         // sim speed from display refresh. keep it stretched to the (resized) stage.
         this.simLayer.update(dtMs);
         this.simLayer.resize(this.app.screen.width, this.app.screen.height);
+        // breathe + redraw the drain grate over the (resized) stage; the pulse decays
+        // here so a collection flare fades even on frames the sim advanced no steps.
+        this.drainMarker.update(dt, this.app.screen.width, this.app.screen.height);
         // breathe the surge core glow each frame so the pot reads as living molten
         // matter; only redraws while a pot is latched (design §3 render seam).
         if (this.glowPot) {
