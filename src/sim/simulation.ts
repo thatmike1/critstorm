@@ -1037,7 +1037,17 @@ export class Simulation {
         // the gate and never crust).
         if (!coolantAdjacent && this.heat[i] < emitTemp[Mat.LAVA])
             this.heat[i] = emitTemp[Mat.LAVA];
-        this.wake(x, y); // keep lava pools shimmering / reactive
+        // no unconditional self-wake: hot lava is far off ambient, so diffuse()
+        // re-wakes this cell's chunk every frame on its own (its offAmbient gate).
+        // that made the per-cell wake here pure overhead — across a lava floor it
+        // is the single biggest cost the dirty-chunk scheduler can't recover, since
+        // every resting lava cell re-woke a 3x3 chunk neighborhood the heat pass was
+        // about to wake anyway (perf pass, design §7). the active-chunk set is
+        // byte-identical with or without this call at any tuning where lava sits
+        // above the ambient band. the guard below only re-wakes in the (unreachable
+        // at current tuning: lava crusts well before this) case where a resting lava
+        // cell has cooled into the ambient band, which diffuse would let sleep.
+        if (this.heat[i] - AMBIENT <= AMBIENT_BAND) this.wake(x, y);
 
         // Viscous: only sometimes flow, and only sluggishly sideways.
         if (Math.random() < 0.6) {
