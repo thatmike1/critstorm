@@ -173,13 +173,20 @@ export function App() {
             // (1 - fee). essence now flows ONLY through here (applyAttack no longer
             // credits it), so an attack pays out only once its gold reaches home.
             const collector = new Collector(defaultCollectorRegion(e.storm));
+            // show the drain on screen (design pillar 4): the marker grate marks the
+            // catchment so gold reaching it reads as banked, not silently vanished.
+            e.setDrainRegion(collector.region);
             const frame = (now: number) => {
                 const dt = Math.min((now - last) / 1000, 0.1);
                 last = now;
                 const s = stateRef.current;
                 const surge = surgeRef.current;
                 const results = tick(s, dt, Math.random);
-                s.essence += collector.collect(e.simulation);
+                const drained = collector.collect(e.simulation);
+                s.essence += drained;
+                // pulse the drain grate the frame it converts gold, so essence income
+                // visibly originates FROM the drain rather than appearing on the HUD.
+                if (drained > 0) engine!.pulseDrain();
                 for (const r of results) {
                     engine!.spawn(r.damage, r.tier, r.golden);
                     // inside a surge, every strike folds into the pot (design §3).
