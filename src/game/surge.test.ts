@@ -279,6 +279,18 @@ describe("Surge core heat (design §3/§6)", () => {
         expect(s.coreTemp).toBe(0); // reset after the exit
     });
 
+    it("reports the busting crit as captured so callers do not also erupt it (critstorm-cjs)", () => {
+        // same deterministic single-spike bust as above: the strike deactivates the
+        // surge inside recordStrike, yet it WAS folded into the (now burned) pot.
+        // callers key the de-dup erupt guard on this return value, not on `active`.
+        const s = new Surge({}, { rng: () => 1, criticalTemp: 50 });
+        s.addHeat(100);
+        expect(s.recordStrike(crit(40, 1), 5)).toBe(true); // captured AND busts
+        expect(s.active).toBe(false);
+        // after the bust the machine is idle again: nothing is captured.
+        expect(s.recordStrike(crit(40, 1), 5)).toBe(false);
+    });
+
     it("busts on the ambient ramp alone — the anti-stall clock cannot be waited out", () => {
         const ends: SurgeEndReason[] = [];
         const s = new Surge(

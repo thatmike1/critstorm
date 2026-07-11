@@ -183,13 +183,15 @@ export function App() {
                 for (const r of results) {
                     engine!.spawn(r.damage, r.tier, r.golden);
                     // inside a surge, every strike folds into the pot (design §3).
-                    surge.recordStrike(r, baseDamage(s));
-                    // de-dup (hkm.3): during a surge the strike's gold is captured by
-                    // the pot and paid out once on BANK, so it must NOT also erupt as
+                    // de-dup (hkm.3): a captured strike must NOT also erupt as
                     // collectable world gold — that would double-credit (pot + world).
+                    // the return value, not surge.active, decides: a crit that busts
+                    // the surge deactivates it mid-call yet was still captured (and
+                    // burned with the pot), so it must not leak out (critstorm-cjs).
                     // outside a surge it erupts normally (auto-strikes have no cursor,
                     // so they land at a random strike-zone point) and feeds the drain.
-                    if (!surge.active) engine!.erupt(r.damage, r.tier);
+                    const captured = surge.recordStrike(r, baseDamage(s));
+                    if (!captured) engine!.erupt(r.damage, r.tier);
                     audioRef.current.attack(r.tier);
                     if (r.golden) audioRef.current.golden();
                 }
@@ -292,15 +294,17 @@ export function App() {
         const r = rollAttack(s, Math.random);
         applyAttack(s, r);
         // during a surge the click's strike folds into the pot (design §3).
-        surge.recordStrike(r, baseDamage(s));
+        const captured = surge.recordStrike(r, baseDamage(s));
         engineRef.current?.spawn(r.damage, r.tier, r.golden);
         // outside a surge a manual hit erupts gold, so clicking feeds the collector
         // like the auto-loop does — essence flows only through the drain, never here.
         // the ballistic eruption arcs from the core to the click (target) and deposits
-        // molten gold that falls, cools, and settles into the collector band. during a
-        // surge the strike is captured by the pot instead and paid out once on BANK, so
-        // erupting here too is suppressed to avoid double-crediting (de-dup, hkm.3).
-        if (!surge.active) engineRef.current?.erupt(r.damage, r.tier, target);
+        // molten gold that falls, cools, and settles into the collector band. a strike
+        // captured by the pot is instead paid out once on BANK, so erupting here too is
+        // suppressed to avoid double-crediting (de-dup, hkm.3) — keyed on the capture
+        // return, not surge.active, so the crit that busts the surge cannot leak out
+        // as world gold on top of burning with the pot (critstorm-cjs).
+        if (!captured) engineRef.current?.erupt(r.damage, r.tier, target);
         audioRef.current.attack(Math.max(r.tier, 1));
         if (r.golden) audioRef.current.golden();
     };

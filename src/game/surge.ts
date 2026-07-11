@@ -253,14 +253,20 @@ export class Surge {
      * in the pot — you rode it, it pumped, then it burned). a no-op outside a surge.
      * @param result the rolled attack; `tier > 0` marks it a crit.
      * @param base the current base damage, added for a non-crit strike.
+     * @returns true iff the strike was captured by the pot. callers must use this —
+     *   not {@link active} — to decide whether the strike still erupts as world gold:
+     *   a crit whose own spike busts the surge flips `active` to false inside this
+     *   call, but it WAS captured (and burned with the pot), so erupting it too would
+     *   double-path exactly the strike that triggered the bust (critstorm-cjs).
      */
-    recordStrike(result: AttackResult, base: number): void {
-        if (this._phase !== "surging") return;
+    recordStrike(result: AttackResult, base: number): boolean {
+        if (this._phase !== "surging") return false;
         const isCrit = result.tier > 0;
         this._contributions += isCrit ? result.damage : base;
         if (isCrit) this._crits += 1;
         this.listeners.onPotChange?.(this.pot);
         if (isCrit) this.addCoreHeat(critHeatSpike(result.tier, this.rng));
+        return true;
     }
 
     /**
