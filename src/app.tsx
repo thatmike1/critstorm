@@ -24,6 +24,7 @@ import {
 import { formatNumber } from "./game/format";
 import { Collector, defaultCollectorRegion } from "./game/collector";
 import { Surge } from "./game/surge";
+import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
 
 /** clicking heat: each manual click adds this much (0-100 scale) */
@@ -130,6 +131,14 @@ export function App() {
         potValue: 0,
         multiplier: 1,
         crits: 0,
+        coreTemp: 0,
+        criticalTemp: surgeRef.current.criticalTemp,
+        // bumped every time the pot captures a strike, so the readout replays its
+        // land animation — proof each strike went SOMEWHERE (the pot), not nowhere.
+        captureSeq: 0,
+        // true for a beat right after a surge ignites, to fire the unmissable
+        // "SURGE" ignition flash (design pillar 4 — a real mode change, loudly).
+        igniting: false,
     });
     const [pulsing, setPulsing] = useState<Partial<Record<UpgradeId, boolean>>>({});
     // the selected defense brush (design §4.2). null = attack mode: clicking the
@@ -137,6 +146,13 @@ export function App() {
     // paint surface instead, and pointer drags paint that material for essence.
     const [selectedBrush, setSelectedBrush] = useState<BrushId | null>(null);
     const paintingRef = useRef(false);
+    // surge-HUD edge trackers (design §3 legibility): the pot readout replays its
+    // land animation only when the pot actually grows, and the ignition flash fires
+    // only on the idle→surging edge — both read from the 10Hz frame loop.
+    const prevPotRef = useRef(0);
+    const prevSurgingRef = useRef(false);
+    const captureSeqRef = useRef(0);
+    const igniteUntilRef = useRef(0);
 
     useEffect(() => {
         let engine: CritEngine | null = null;
@@ -226,11 +242,25 @@ export function App() {
                     setCps(clickTimesRef.current.length / CPS_WINDOW);
                     setHeat(surge.heat);
                     const pot = surge.pot;
+                    // ignition edge: the frame heat crosses the threshold and the
+                    // surge goes live — latch a short window for the loud flash.
+                    if (surge.active && !prevSurgingRef.current) {
+                        igniteUntilRef.current = now + 1200;
+                    }
+                    prevSurgingRef.current = surge.active;
+                    // capture edge: bump the sequence whenever the pot grew, so the
+                    // readout replays its land animation for every strike absorbed.
+                    if (pot.value > prevPotRef.current) captureSeqRef.current += 1;
+                    prevPotRef.current = pot.value;
                     setSurgeHud({
                         active: surge.active,
                         potValue: pot.value,
                         multiplier: pot.multiplier,
                         crits: pot.crits,
+                        coreTemp: surge.coreTemp,
+                        criticalTemp: surge.criticalTemp,
+                        captureSeq: captureSeqRef.current,
+                        igniting: surge.active && now < igniteUntilRef.current,
                     });
                     setHud(snapshot(s));
                 }
@@ -371,6 +401,9 @@ export function App() {
     };
 
     const surging = surgeHud.active;
+    // core-temp headroom for the gauge (design §3): the two ticks + "one more crit"
+    // readout come straight from the pure helper, no HUD-side math.
+    const headroom = coreHeadroom(surgeHud.coreTemp, surgeHud.criticalTemp);
     // a brush is "buyable" while at least one cell of it is affordable — the same
     // essence gate paintBrush enforces per cell (design §4.2).
     const affordBrush = (b: BrushDef): boolean => canPaint(stateRef.current, b);
@@ -379,7 +412,12 @@ export function App() {
         <div className="layout">
             <div
                 ref={hostRef}
-                className={["stage", surging ? "frenzy" : "", selectedBrush ? "painting" : ""]
+                className={[
+                    "stage",
+                    surging ? "frenzy" : "",
+                    surgeHud.igniting ? "igniting" : "",
+                    selectedBrush ? "painting" : "",
+                ]
                     .filter(Boolean)
                     .join(" ")}
                 onPointerDown={onStagePointerDown}
@@ -423,12 +461,68 @@ export function App() {
                     )}
                 </div>
                 {surging ? (
-                    <div className="frenzy-banner">
-                        <span className="frenzy-word">SURGE</span>
-                        <span className="frenzy-x">×{surgeHud.multiplier.toFixed(2)}</span>
-                        <span className="frenzy-time">pot {formatNumber(surgeHud.potValue)}</span>
-                        <button className="bank-btn" onClick={bankSurge}>
-                            BANK <em>space</em>
+                    <div className={surgeHud.igniting ? "surge-panel igniting" : "surge-panel"}>
+                        <div className="surge-banner">
+                            <span className="surge-word">SURGE</span>
+                            <span className="surge-mult">×{surgeHud.multiplier.toFixed(2)}</span>
+                            <span className="surge-feed">strikes feed the pot</span>
+                        </div>
+                        <div className="pot-window">
+                            <span className="pot-value" key={surgeHud.captureSeq}>
+                                {formatNumber(surgeHud.potValue)}
+                            </span>
+                            <span className="pot-label">
+                                pot · {surgeHud.crits} crit{surgeHud.crits === 1 ? "" : "s"}
+                            </span>
+                        </div>
+                        <div className="core-gauge">
+                            <div className="core-gauge-label">
+                                <span>core temp</span>
+                                <span
+                                    className={headroom.medianFits ? "core-room" : "core-room hot"}
+                                >
+                                    {headroom.medianCritsLeft > 0
+                                        ? `~${headroom.medianCritsLeft} more crit${
+                                              headroom.medianCritsLeft === 1 ? "" : "s"
+                                          }`
+                                        : "one crit could bust"}
+                                </span>
+                            </div>
+                            <div className="core-bar">
+                                <div
+                                    className="core-fill"
+                                    style={{ transform: `scaleX(${headroom.load.toFixed(3)})` }}
+                                />
+                                <div
+                                    className={
+                                        headroom.medianFits
+                                            ? "core-tick median"
+                                            : "core-tick median passed"
+                                    }
+                                    style={{ left: `${(headroom.medianTick * 100).toFixed(1)}%` }}
+                                    title="a typical crit still fits left of here"
+                                />
+                                <div
+                                    className={
+                                        headroom.maxFits ? "core-tick max" : "core-tick max passed"
+                                    }
+                                    style={{ left: `${(headroom.maxTick * 100).toFixed(1)}%` }}
+                                    title="the hottest crit still fits left of here"
+                                />
+                            </div>
+                            <div className="core-legend">
+                                <span className={headroom.medianFits ? "" : "off"}>
+                                    ◆ median crit {headroom.medianFits ? "fits" : "busts"}
+                                </span>
+                                <span className={headroom.maxFits ? "" : "off"}>
+                                    ▲ max crit {headroom.maxFits ? "fits" : "busts"}
+                                </span>
+                            </div>
+                        </div>
+                        <button className="bank-btn wide" onClick={bankSurge}>
+                            <span className="bank-word">BANK</span>
+                            <span className="bank-take">{formatNumber(surgeHud.potValue)}</span>
+                            <em>space</em>
                         </button>
                     </div>
                 ) : (
