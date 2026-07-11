@@ -6,6 +6,7 @@ import type { Simulation } from "../sim/simulation";
 import { bankBurstCount, bankVolleyShares, depositEruption } from "./eruption";
 import { bustPot } from "./bust";
 import type { PotState } from "./surge";
+import { tellsForLoad } from "./surge-tells";
 import { DrainMarker } from "./drain-marker";
 import type { CollectorRegion } from "./collector";
 
@@ -95,6 +96,14 @@ const BANK_SCATTER_CELLS = 5;
 function clampInt(v: number, lo: number, hi: number): number {
     return v < lo ? lo : v > hi ? hi : v;
 }
+
+/**
+ * radius in grid cells of the ambient heat disc the surge tell ladder stamps around
+ * the storm core (design §3). sized to cover the near-core neighbourhood where placed
+ * water/plants tend to sit, so the tell radiates FROM the core rather than the whole
+ * field cooking at once — the physics stays legible as a reaction to the surge.
+ */
+const TELL_HEAT_RADIUS = 22;
 
 /**
  * renders the crit-number blizzard on a full-window pixi stage;
@@ -374,6 +383,30 @@ export class CritEngine {
         }
         this.coreGlow.visible = true;
         this.drawCoreGlow(pot);
+    }
+
+    /**
+     * drive the staged physical-tell ladder (design §3) from the surge core load. as
+     * `coreLoad` (coreTemp / criticalTemp, [0,1]) climbs toward critical the world
+     * around the core reacts in a fixed, learnable order: it stamps a rung-scaled
+     * ambient heat disc on the core neighbourhood — so placed water steams, plants
+     * smoke, etc. through the real physics on the next step — and ramps the render-only
+     * gold shimmer so pooled gold flickers "toward melt". CONSUMES coreLoad only; it
+     * never touches the surge machine or the heating math (owned by the 5b tune). pass
+     * 0 (idle / surge ended) to clear the tell: no heat stamp, gold rendered steady.
+     * call once per frame alongside {@link renderSurge}.
+     */
+    applyTells(coreLoad: number): void {
+        const tell = tellsForLoad(coreLoad);
+        this.world.sim.goldShimmer = tell.goldShimmer;
+        if (tell.heatTarget > 0) {
+            this.world.sim.injectHeat(
+                this.world.core.x,
+                this.world.core.y,
+                TELL_HEAT_RADIUS,
+                tell.heatTarget
+            );
+        }
     }
 
     /** redraw the core-glow disc for `pot` at the current breathing pulse. */

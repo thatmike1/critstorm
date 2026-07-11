@@ -230,6 +230,10 @@ export function App() {
                 // button) erupts the pot as one gold mega-mountain (design §3, hkm.3).
                 // the overheat bust is the other exit (hkm.4, not yet wired).
                 engine!.renderSurge(surge.active ? surge.pot : null);
+                // drive the staged physical-tell ladder (design §3): the world near the
+                // core reacts in a fixed order as the core heats toward critical, so the
+                // ride reads. consumes coreLoad only; 0 while idle clears the tells.
+                engine!.applyTells(surge.active ? surge.coreLoad : 0);
                 if (s.elapsed >= nextBonusRef.current) {
                     engine!.spawnBonus(catchBonus);
                     scheduleBonus(s.elapsed);
