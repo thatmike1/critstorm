@@ -128,6 +128,12 @@ export class Simulation {
     count = 0;
     emissive = 0; // fire/lava cell count this frame; lets renderer skip glow passes
     private showTemp = false; // debug heatmap: render heat as a blue->red ramp
+    // render-only surge tell (design §3): a [0,1] intensity that makes solid GOLD
+    // shimmer/flicker as the surge core approaches critical ("world gold shimmers
+    // toward melt"). PURELY a display cue — read only in colorOf(), never by step():
+    // it moves no matter, melts no gold, and touches no heat field. the game layer
+    // drives it from the tell ladder each frame; 0 leaves gold rendered dead-steady.
+    goldShimmer = 0;
     // feedback seam for gold-value loss (§4.1 conservation "lost" term). the core
     // stays headless: it just REPORTS each destruction (cell, amount, cause) and a
     // renderer/audio layer turns that into a flash + blip so risk reads instantly.
@@ -1262,9 +1268,16 @@ export class Simulation {
                 const f = ((ex + this.frame * 2) % 44) - 18;
                 return shade(255, 110, 30, f);
             }
-            case Mat.GOLD:
+            case Mat.GOLD: {
                 // metallic gold with a coarse glitter; some cells catch a bright fleck.
-                return shade(214, 176, 60, (ex % 44 > 36 ? 20 : 0) + (ex % 22) - 10);
+                const glint = (ex % 44 > 36 ? 20 : 0) + (ex % 22) - 10;
+                // surge tell (design §3): as the core nears critical the world gold
+                // shimmers toward melt — a per-cell animated brightening scaled by the
+                // render-only `goldShimmer` intensity. render cue only, no melt.
+                if (this.goldShimmer <= 0) return shade(214, 176, 60, glint);
+                const flicker = (((ex + this.frame * 3) % 24) - 12) * this.goldShimmer;
+                return shade(214, 176, 60, glint + flicker + 30 * this.goldShimmer);
+            }
             case Mat.MOLTEN_GOLD: {
                 // hot liquid gold, animated like lava but shifted brighter/yellower.
                 const f = ((ex + this.frame * 2) % 40) - 16;
