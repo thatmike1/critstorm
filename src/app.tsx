@@ -360,7 +360,7 @@ export function App() {
         const pot = surge.endSurge("bank");
         if (pot.value > 0) {
             engineRef.current?.eruptBank(pot.value);
-            audioRef.current.jackpot();
+            audioRef.current.bank(pot.value);
         }
     };
 

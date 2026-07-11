@@ -3,7 +3,7 @@ import { formatNumber } from "./format";
 import { createWorld, type World } from "./world";
 import { SimLayer } from "./sim-layer";
 import type { Simulation } from "../sim/simulation";
-import { depositEruption } from "./eruption";
+import { bankBurstCount, bankVolleyShares, depositEruption } from "./eruption";
 import { bustPot } from "./bust";
 import type { PotState } from "./surge";
 import { DrainMarker } from "./drain-marker";
@@ -61,8 +61,11 @@ interface Eruption {
     ey: number;
     /** peak parabolic lift in screen px (how high the arc bows). */
     arc: number;
-    /** elapsed flight time in ms. */
+    /** elapsed time since spawn in ms (includes the pre-launch queue delay). */
     t: number;
+    /** ms this projectile waits at the core before its arc begins (bank-volley
+     * stagger; 0 for a per-strike eruption that launches immediately). */
+    delay: number;
     /** total flight time in ms. */
     dur: number;
     /** impact grid cell (already clamped in-bounds and rounded). */
@@ -79,6 +82,14 @@ const POOL_SIZE = 600;
  * MOLTEN_GOLD, so the banked mountain cools to collectable GOLD regardless of tier —
  * the pot is physical gold, never lava (that is the overheat bust, hkm.4). */
 const BANK_TIER = 4;
+
+/** window (ms) over which a BANK volley's bursts rain onto the core, staggered so the
+ * mountain visibly builds instead of appearing in one frame (design §3). */
+const BANK_VOLLEY_MS = 900;
+
+/** grid-cell scatter radius of BANK bursts around the core, so shares pile into a
+ * mountain instead of stacking on one column. */
+const BANK_SCATTER_CELLS = 5;
 
 /** clamp `v` into the inclusive integer range [lo, hi]. */
 function clampInt(v: number, lo: number, hi: number): number {
@@ -259,7 +270,26 @@ export class CritEngine {
         gy += (Math.random() - 0.5) * 2 * spread;
         const gxi = clampInt(Math.round(gx), 0, W - 1);
         const gyi = clampInt(Math.round(gy), 0, H - 1);
+        this.launchEruption(gxi, gyi, payout, tier);
+    }
 
+    /**
+     * queue one ballistic gold projectile from the storm core to grid cell (gxi,gyi),
+     * depositing `payout` as MOLTEN_GOLD on landing. `delayMs` holds the projectile
+     * invisible at the core before its arc begins, which is how a BANK volley staggers
+     * its bursts into a raining mountain (design §3). shared by {@link erupt} (single
+     * strike, no delay) and {@link eruptBank} (a delayed burst per share).
+     */
+    private launchEruption(
+        gxi: number,
+        gyi: number,
+        payout: number,
+        tier: number,
+        delayMs = 0
+    ): void {
+        const { W, H } = this.world.sim;
+        const sw = this.app.screen.width;
+        const sh = this.app.screen.height;
         // screen-space flight endpoints (grid -> stretched sprite scale).
         const sx = (this.world.core.x / W) * sw;
         const sy = (this.world.core.y / H) * sh;
@@ -271,6 +301,8 @@ export class CritEngine {
         const color = TIER_COLORS[Math.min(tier, TIER_COLORS.length - 1)];
         gfx.circle(0, 0, 3 + Math.min(tier, 6)).fill(color);
         gfx.position.set(sx, sy);
+        // a queued burst stays hidden at the core until its delay elapses.
+        gfx.visible = delayMs <= 0;
         this.eruptLayer.addChild(gfx);
         this.eruptions.push({
             gfx,
@@ -280,6 +312,7 @@ export class CritEngine {
             ey,
             arc: Math.max(40, dist * 0.4),
             t: 0,
+            delay: delayMs,
             dur: 240 + dist * 0.6,
             gx: gxi,
             gy: gyi,
@@ -289,24 +322,38 @@ export class CritEngine {
     }
 
     /**
-     * BANK the surge pot (design §3): the entire pot erupts at once as a single gold
-     * mega-eruption — the spectacle payoff. reuses the ballistic-flight → MOLTEN_GOLD
-     * handoff of {@link erupt} (mass/value from §6: `m = clamp(4 + 6·log10(P), 4, 64)`,
-     * `P/m` per cell), but forces the impact onto the storm core so the mountain piles
-     * over the collector below. the banked gold is PHYSICAL: it must still cool, settle,
-     * and be collected — it does NOT convert directly to essence. `payout <= 0` no-ops.
+     * BANK the surge pot (design §3): the entire pot erupts as a gold MOUNTAIN — the
+     * spectacle payoff. routing the whole pot through one per-strike eruption clamped
+     * its mass at MAX_ERUPTION_CELLS, so a fat pot read as a modest blob (critstorm-724).
+     * instead the pot is split into a VOLLEY of {@link bankBurstCount} bursts (shares
+     * from {@link bankVolleyShares}, summing to exactly `payout`) that rain onto the
+     * core over ~{@link BANK_VOLLEY_MS}ms, each scattered within a few cells so they
+     * pile into a mountain over the collector below. total deposited mass is the sum of
+     * the per-burst masses — far denser than the single-eruption cap — yet bounded and
+     * sublinear, so a lava-floor worst case still holds 60fps (§6). the banked gold is
+     * PHYSICAL: it must still cool, settle, and be collected. `payout <= 0` no-ops.
      */
     eruptBank(payout: number): void {
         if (!(payout > 0)) return;
         const { W, H } = this.world.sim;
-        const sw = this.app.screen.width;
-        const sh = this.app.screen.height;
-        // aim straight at the core so the mountain lands over the collector beneath it.
-        const target = { x: (this.world.core.x / W) * sw, y: (this.world.core.y / H) * sh };
-        this.erupt(payout, BANK_TIER, target);
-        // mega tell: a big gold flash + shake so the bank reads as the spectacle payoff.
-        this.flashScreen(0xffd75e, 0.35);
-        this.shake(14);
+        const bursts = bankBurstCount(payout);
+        const shares = bankVolleyShares(payout, bursts);
+        // rain each share as a delayed ballistic burst, scattered in a disc around the
+        // core (sqrt keeps the scatter area-uniform) so the mountain builds broadly.
+        shares.forEach((share, i) => {
+            const angle = (i / bursts) * Math.PI * 2 + Math.random() * 0.8;
+            const r = Math.sqrt(Math.random()) * BANK_SCATTER_CELLS;
+            const gx = clampInt(Math.round(this.world.core.x + Math.cos(angle) * r), 0, W - 1);
+            const gy = clampInt(Math.round(this.world.core.y + Math.sin(angle) * r), 0, H - 1);
+            const delay = (i / bursts) * BANK_VOLLEY_MS;
+            this.launchEruption(gx, gy, share, BANK_TIER, delay);
+        });
+        // weight the moment, scaled to pot size (design §3): the fatter the pot, the
+        // harder the flash + shake. heft in [0,1] from log10(pot), so a jackpot bank
+        // slams while a trickle bank still lands loud (this wave errs loud, not subtle).
+        const heft = Math.min(1, Math.log10(1 + payout) / 6);
+        this.flashScreen(0xffd75e, 0.35 + heft * 0.35);
+        this.shake(16 + heft * 12);
     }
 
     /**
@@ -499,7 +546,11 @@ export class CritEngine {
         for (let i = this.eruptions.length - 1; i >= 0; i--) {
             const e = this.eruptions[i];
             e.t += dtMs;
-            const u = Math.min(e.t / e.dur, 1);
+            // a queued bank burst waits at the core until its stagger delay elapses,
+            // then becomes visible and flies; per-strike eruptions have delay 0.
+            if (e.t < e.delay) continue;
+            e.gfx.visible = true;
+            const u = Math.min((e.t - e.delay) / e.dur, 1);
             const x = e.sx + (e.ex - e.sx) * u;
             const lift = e.arc * Math.sin(Math.PI * u); // screen y grows downward
             e.gfx.position.set(x, e.sy + (e.ey - e.sy) * u - lift);

@@ -66,4 +66,28 @@ export class AudioEngine {
         [523, 659, 784, 1047, 1319].forEach((f, i) => this.blip(f, 0.2, "triangle", 0.1, i * 0.06));
         this.blip(262, 0.5, "square", 0.05, 0.1);
     }
+
+    /**
+     * BANK the surge pot (design §3): the spectacle payoff, so this is the loudest
+     * moment in the game — a deep detonation boom under a rising gold arpeggio that
+     * lengthens and brightens with the pot, so a jackpot bank sounds bigger than a
+     * trickle. at least as loud as {@link jackpot} (peak gain ≥ its 0.1). `potValue`
+     * scales the run length; a non-positive pot still rings the floor volley.
+     */
+    bank(potValue = 0): void {
+        // heft in [0,1] from pot magnitude (log10) → a fatter pot rings longer/brighter.
+        const heft = Math.min(1, Math.log10(1 + Math.max(0, potValue)) / 8);
+        // deep detonation: a low sub swelling under the whole arpeggio.
+        this.blip(90, 0.6, "square", 0.13);
+        this.blip(60, 0.75, "sine", 0.11, 0.02);
+        // rising gold arpeggio, brighter/louder than the jackpot payout run; 5→7 notes
+        // as the pot grows so the bank literally sounds bigger the more you banked.
+        const notes = [392, 523, 659, 784, 1047, 1319, 1568];
+        const count = 5 + Math.round(heft * 2);
+        for (let i = 0; i < count; i++) {
+            this.blip(notes[i], 0.24, "triangle", 0.12, 0.05 + i * 0.06);
+        }
+        // a bright topping shimmer crowns a fat-pot bank.
+        if (heft > 0.5) this.blip(2093, 0.3, "triangle", 0.09, 0.05 + count * 0.06);
+    }
 }
