@@ -73,7 +73,7 @@ describe("coreHeadroom", () => {
     });
 
     it("a max-tier spike never fits from cold at the base critical temp", () => {
-        // base ceiling 490 < max spike 650: a max-tier crit is an instant bust
+        // base ceiling 620 < max spike 650: a max-tier crit is an instant bust
         const h = coreHeadroom(0, CORE_CRITICAL_TEMP);
         expect(h.maxFits).toBe(false);
         expect(h.maxTick).toBe(0);

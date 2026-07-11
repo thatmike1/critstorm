@@ -341,18 +341,24 @@ describe("Surge bust hazard shape (design §3/§6 tuning target)", () => {
 
     it("every undefended ride eventually busts, in a sane crit band", () => {
         expect(bustN.every((n) => n > 0)).toBe(true); // none hit the strike cap
-        expect(Math.min(...bustN)).toBeGreaterThanOrEqual(3);
+        expect(Math.min(...bustN)).toBeGreaterThanOrEqual(4);
         expect(Math.max(...bustN)).toBeLessThanOrEqual(12);
     });
 
-    it("centres the bust near the §3 target of n≈6", () => {
+    it("centres the spike-only bust ~2 crits above the full-ride n≈6 target", () => {
+        // this ride keeps ambient a mild add (0.05 s/strike), so it measures the
+        // SPIKE-ONLY crossover — distinct from the surge-harness full-ride crossover,
+        // which folds in the ambient wait toll and is the canonical n≈6 (critstorm-4cz.3).
+        // the wave-5b headroom bump (CORE_CRITICAL_TEMP 490→620) moves this spike-only
+        // reference to ~8: the ambient wait toll is worth roughly 2 crits, so the two
+        // cadences sit ~2 apart and cannot both land on 6 while the anti-stall clock lives.
         const sorted = [...bustN].sort((a, b) => a - b);
         const median = sorted[sorted.length >> 1];
         const mean = bustN.reduce((a, b) => a + b, 0) / bustN.length;
-        expect(median).toBeGreaterThanOrEqual(5);
-        expect(median).toBeLessThanOrEqual(8);
-        expect(mean).toBeGreaterThan(5);
-        expect(mean).toBeLessThan(8);
+        expect(median).toBeGreaterThanOrEqual(7);
+        expect(median).toBeLessThanOrEqual(9);
+        expect(mean).toBeGreaterThan(7);
+        expect(mean).toBeLessThan(9);
     });
 
     it("has a monotone-increasing per-crit hazard crossing ~1/3 near n≈6", () => {
@@ -371,10 +377,12 @@ describe("Surge bust hazard shape (design §3/§6 tuning target)", () => {
             expect(h).toBeGreaterThanOrEqual(prev - 1e-9);
             prev = h;
         }
-        // the design §3 crossover: riding the 6th crit busts roughly a third of the time,
-        // which is exactly where 1.5× stops paying — banking early becomes rational.
-        expect(CORE_CRITICAL_TEMP).toBe(490);
-        expect(hazard(6)).toBeGreaterThan(0.2);
-        expect(hazard(6)).toBeLessThan(0.5);
+        // spike-only crossover: with the wave-5b ceiling (620) and mild ambient, riding
+        // the 8th crit busts well past the 1/3 EV break-even, while the 7th is still cheap —
+        // a sharp cliff, not a slow cook. the full-ride harness crossover (ambient wait
+        // folded in) is the canonical n≈6; this spike-only view sits ~2 crits deeper.
+        expect(CORE_CRITICAL_TEMP).toBe(620);
+        expect(hazard(7)).toBeLessThan(1 / 3);
+        expect(hazard(8)).toBeGreaterThan(1 / 3);
     });
 });
