@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Mat } from "../sim/materials";
 import { createWorld } from "./world";
 import {
@@ -23,6 +23,10 @@ function countMat(world: ReturnType<typeof createWorld>, mat: number): number {
 function fixedRng(): number {
     return 0.5;
 }
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
 
 describe("storm event escalation", () => {
     it("shortens the event cadence and raises severity as the storm runs", () => {
@@ -74,6 +78,23 @@ describe("storm event simulation effects", () => {
         for (const cell of event.cells) expect(cell.y).toBe(0);
     });
 
+    it("routes acid-destroyed event gold into the loss ledger", () => {
+        const world = createWorld({ seed: 3, width: 40, height: 30, floorLevel: 0.8, variation: 0 });
+        let lost = 0;
+        world.sim.setGoldLossListener((event) => {
+            lost += event.amount;
+        });
+        const goldRain = triggerStormEvent(world, "gold-rain", 2, fixedRng);
+        world.sim.step();
+        triggerStormEvent(world, "acid-drizzle", 2, fixedRng);
+        vi.spyOn(Math, "random").mockReturnValue(0.1);
+
+        world.sim.step(120);
+
+        expect(lost).toBeGreaterThan(0);
+        expect(world.sim.totalValue() + lost).toBeCloseTo(goldRain.erupted, 6);
+    });
+
     it("opens a heated lava fissure along the terrain floor", () => {
         const world = createWorld({ seed: 4 });
         const event = triggerStormEvent(world, "lava-fissure", 3, fixedRng);
@@ -84,6 +105,22 @@ describe("storm event simulation effects", () => {
             expect(cell.y).toBe(world.floorHeightAt(cell.x));
             expect(world.sim.heat[cell.y * world.sim.W + cell.x]).toBeGreaterThanOrEqual(700);
         }
+    });
+
+    it("routes lava-destroyed event gold into the loss ledger", () => {
+        const world = createWorld({ seed: 4, width: 40, height: 30, floorLevel: 0.8, variation: 0 });
+        let lost = 0;
+        world.sim.setGoldLossListener((event) => {
+            lost += event.amount;
+        });
+        const goldRain = triggerStormEvent(world, "gold-rain", 2, fixedRng);
+        triggerStormEvent(world, "lava-fissure", 5, fixedRng);
+        vi.spyOn(Math, "random").mockReturnValue(0.1);
+
+        world.sim.step(200);
+
+        expect(lost).toBeGreaterThan(0);
+        expect(world.sim.totalValue() + lost).toBeCloseTo(goldRain.erupted, 6);
     });
 
     it("keeps lightning-front as an explicit no-op stub", () => {
