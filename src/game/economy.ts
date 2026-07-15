@@ -55,6 +55,10 @@ export const UPGRADES: UpgradeDef[] = [
 
 export interface EconomyState {
     essence: number;
+    /** cumulative essence collected during the current storm; never spent down. */
+    bankedEssence: number;
+    /** whether this storm has reached its first surge for the minimum-core floor. */
+    reachedFirstSurge: boolean;
     totalDamage: number;
     elapsed: number;
     attackTimer: number;
@@ -78,6 +82,8 @@ export const GOLDEN_MULTI = 25;
 export function createState(): EconomyState {
     return {
         essence: 0,
+        bankedEssence: 0,
+        reachedFirstSurge: false,
         totalDamage: 0,
         elapsed: 0,
         attackTimer: 0,
@@ -134,6 +140,20 @@ export function buy(s: EconomyState, id: UpgradeId): boolean {
     s.essence -= upgradeCost(s, id);
     s.levels[id] += 1;
     return true;
+}
+
+/**
+ * credit essence collected during this storm to both its spendable and cumulative
+ * balances. the cumulative balance is intentionally never reduced by purchases,
+ * because storm-core conversion uses all essence collected (design §5).
+ * @param amount collected essence to credit; non-positive and non-finite inputs are ignored.
+ * @returns the amount credited, or 0 when the input was ignored.
+ */
+export function creditEssence(s: EconomyState, amount: number): number {
+    if (!(amount > 0) || !Number.isFinite(amount)) return 0;
+    s.essence += amount;
+    s.bankedEssence += amount;
+    return amount;
 }
 
 /**

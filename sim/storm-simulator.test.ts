@@ -161,6 +161,8 @@ describe("storm economy (design.md §6 anti-farming)", () => {
 function emptyEconomy() {
     return {
         essence: 0,
+        bankedEssence: 0,
+        reachedFirstSurge: false,
         totalDamage: 0,
         elapsed: 0,
         attackTimer: 0,

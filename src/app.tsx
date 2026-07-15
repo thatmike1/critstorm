@@ -3,6 +3,7 @@ import { CritEngine } from "./game/crit-engine";
 import { AudioEngine } from "./game/audio";
 import {
     createState,
+    creditEssence,
     tick,
     buy,
     canBuy,
@@ -21,6 +22,7 @@ import {
     type RankInfo,
     type UpgradeId,
 } from "./game/economy";
+import { markFirstSurge } from "./game/storm-end";
 import { formatNumber } from "./game/format";
 import { Collector, defaultCollectorRegion } from "./game/collector";
 import { Surge } from "./game/surge";
@@ -168,7 +170,7 @@ export function App() {
             // the jackpot is a direct instant grant (design §4.3 bonus), so it
             // does NOT erupt collectable gold — erupting it would double-credit
             // once the collector drained that gold back into essence.
-            s.essence += payout;
+            creditEssence(s, payout);
             s.totalDamage += payout;
             engine?.spawn(payout, 5, true);
         };
@@ -199,7 +201,7 @@ export function App() {
                 const surge = surgeRef.current;
                 const results = tick(s, dt, Math.random);
                 const drained = collector.collect(e.simulation);
-                s.essence += drained;
+                creditEssence(s, drained);
                 // pulse the drain grate the frame it converts gold, so essence income
                 // visibly originates FROM the drain rather than appearing on the HUD.
                 if (drained > 0) engine!.pulseDrain();
@@ -331,7 +333,10 @@ export function App() {
         const target = rect ? { x: e.clientX - rect.left, y: e.clientY - rect.top } : undefined;
         // a click fills the heat meter; when it tops out a surge ignites (design §3).
         const surge = surgeRef.current;
-        if (surge.addHeat(HEAT_PER_CLICK)) audioRef.current.frenzy();
+        if (surge.addHeat(HEAT_PER_CLICK)) {
+            markFirstSurge(s);
+            audioRef.current.frenzy();
+        }
         const r = rollAttack(s, Math.random);
         applyAttack(s, r);
         // during a surge the click's strike folds into the pot (design §3).
