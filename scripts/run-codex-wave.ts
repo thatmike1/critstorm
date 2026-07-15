@@ -6,16 +6,12 @@ import { createCodexWaveRuntime } from "./codex-wave-runtime";
 import {
     runWave,
     validateWaveDefinition,
+    isRecord,
     type DependencyCheck,
     type WaveDefinition,
     type WaveModel,
     type WaveTask,
 } from "./codex-wave-runner";
-
-/** narrows an unknown value to a record */
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** narrows a model configuration from a dynamic wave module */
 function isWaveModel(value: unknown): value is WaveModel {

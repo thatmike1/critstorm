@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { isRecord } from "./codex-wave-runner";
 import type {
     FixResult,
     GuardResult,
@@ -52,6 +53,7 @@ const REVIEW_SCHEMA = {
                 type: "object",
                 additionalProperties: false,
                 properties: {
+                    id: { type: "string" },
                     file: { type: "string" },
                     line: { type: "integer" },
                     class: {
@@ -60,7 +62,7 @@ const REVIEW_SCHEMA = {
                     },
                     summary: { type: "string" },
                 },
-                required: ["file", "class", "summary"],
+                required: ["id", "file", "class", "summary"],
             },
         },
         verdict: { type: "string", enum: ["clean", "needs-fix"] },
@@ -72,8 +74,30 @@ const FIX_SCHEMA = {
     type: "object",
     additionalProperties: false,
     properties: {
-        fixed: { type: "array", items: { type: "string" } },
-        rejected: { type: "array", items: { type: "string" } },
+        fixed: {
+            type: "array",
+            items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                    findingId: { type: "string" },
+                    summary: { type: "string" },
+                },
+                required: ["findingId", "summary"],
+            },
+        },
+        rejected: {
+            type: "array",
+            items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                    findingId: { type: "string" },
+                    summary: { type: "string" },
+                },
+                required: ["findingId", "summary"],
+            },
+        },
     },
     required: ["fixed", "rejected"],
 } as const;
@@ -162,11 +186,6 @@ async function commandFailure(
     }
 }
 
-/** narrows parsed JSON to a string-keyed object */
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** parses a structured implementation response */
 function parseImplementationResult(value: unknown): ImplementationAgentResult {
     if (!isRecord(value) || typeof value.summary !== "string") {
@@ -179,6 +198,7 @@ function parseImplementationResult(value: unknown): ImplementationAgentResult {
 function parseReviewFinding(value: unknown): ReviewFinding {
     if (
         !isRecord(value) ||
+        typeof value.id !== "string" ||
         typeof value.file !== "string" ||
         typeof value.summary !== "string" ||
         (value.class !== "blocker" &&
@@ -190,6 +210,7 @@ function parseReviewFinding(value: unknown): ReviewFinding {
         throw new Error("review agent returned an invalid finding");
     }
     return {
+        id: value.id,
         file: value.file,
         line: typeof value.line === "number" ? value.line : undefined,
         class: value.class,
@@ -206,10 +227,26 @@ function parseReviewResult(value: unknown): ReviewResult {
     ) {
         throw new Error("review agent returned an invalid result");
     }
-    return {
-        findings: value.findings.map(parseReviewFinding),
-        verdict: value.verdict,
-    };
+    const findings = value.findings.map(parseReviewFinding);
+    if (new Set(findings.map((finding) => finding.id)).size !== findings.length) {
+        throw new Error("review agent returned duplicate finding ids");
+    }
+    return { findings, verdict: value.verdict };
+}
+
+/** parses one fix disposition */
+function parseFindingDisposition(value: unknown): {
+    findingId: string;
+    summary: string;
+} {
+    if (
+        !isRecord(value) ||
+        typeof value.findingId !== "string" ||
+        typeof value.summary !== "string"
+    ) {
+        throw new Error("fix agent returned an invalid disposition");
+    }
+    return { findingId: value.findingId, summary: value.summary };
 }
 
 /** parses a structured fix response */
@@ -217,13 +254,14 @@ function parseFixResult(value: unknown): FixResult {
     if (
         !isRecord(value) ||
         !Array.isArray(value.fixed) ||
-        !value.fixed.every((item) => typeof item === "string") ||
-        !Array.isArray(value.rejected) ||
-        !value.rejected.every((item) => typeof item === "string")
+        !Array.isArray(value.rejected)
     ) {
         throw new Error("fix agent returned an invalid result");
     }
-    return { fixed: value.fixed, rejected: value.rejected };
+    return {
+        fixed: value.fixed.map(parseFindingDisposition),
+        rejected: value.rejected.map(parseFindingDisposition),
+    };
 }
 
 /** runs one isolated Codex worker and returns its structured final response */
@@ -269,7 +307,8 @@ async function runCodexAgent(
         );
 
         const output = await readFile(outputPath, "utf8");
-        return JSON.parse(output) as unknown;
+        const parsed: unknown = JSON.parse(output);
+        return parsed;
     } finally {
         await rm(outputDirectory, { recursive: true, force: true });
     }
@@ -330,7 +369,7 @@ function reviewBody(task: WaveTask, review: ReviewResult): string {
     }
     const findings = review.findings.map((finding) => {
         const location = `${finding.file}${finding.line === undefined ? "" : `:${finding.line}`}`;
-        return `- **${finding.class}** ${location} — ${finding.summary}`;
+        return `- **${finding.class}** ${finding.id} ${location} — ${finding.summary}`;
     });
     return [`Codex wave review for ${task.id}:`, "", ...findings].join("\n");
 }
@@ -371,7 +410,7 @@ Inspect the complete local diff with git diff ${baseSha}...${implementation.bran
 TASK SPEC — identical to the implementer's contract:
 ${task.spec}
 
-Return structured findings with exact file and line references, classed blocker, major, or minor. Use verdict needs-fix when any blocker or major finding exists; otherwise use clean. Do not modify files, post to GitHub, approve, request changes, or spawn subagents. The runner posts a comment-only review.`;
+Return structured findings with stable unique IDs (F1, F2, ...), exact file and line references, classed blocker, major, or minor. Use verdict needs-fix when any blocker or major finding exists; otherwise use clean. Do not modify files, post to GitHub, approve, request changes, or spawn subagents. The runner posts a comment-only review.`;
 }
 
 /** builds the fix prompt from reviewer claims that still require verification */
@@ -386,7 +425,7 @@ ${task.spec}
 NON-MINOR REVIEW CLAIMS:
 ${JSON.stringify(findings, null, 2)}
 
-Do not commit, push, merge, run bd, post reviews, or spawn subagents. The runner owns Git and GitHub mutations. Return structured fixed and rejected summaries.`;
+Do not commit, push, merge, run bd, post reviews, or spawn subagents. The runner owns Git and GitHub mutations. Return exactly one fixed or rejected disposition for every finding ID.`;
 }
 
 /** creates the concrete local-process runtime for one wave */
@@ -598,7 +637,14 @@ export function createCodexWaveRuntime(): WaveRuntime {
             FIX_SCHEMA,
         );
         const result = parseFixResult(agentOutput);
-        if (result.fixed.length + result.rejected.length !== findings.length) {
+        const expectedIds = findings.map((finding) => finding.id).sort();
+        const dispositionIds = [...result.fixed, ...result.rejected]
+            .map((disposition) => disposition.findingId)
+            .sort();
+        if (
+            dispositionIds.length !== expectedIds.length ||
+            dispositionIds.some((id, index) => id !== expectedIds[index])
+        ) {
             throw new Error(`fix worker did not disposition every finding for ${task.id}`);
         }
         await assertHeadUnchanged(workspace.path, before.stdout.trim());

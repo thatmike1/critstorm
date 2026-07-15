@@ -49,6 +49,7 @@ export interface ImplementationResult {
 }
 
 export interface ReviewFinding {
+    readonly id: string;
     readonly file: string;
     readonly line?: number;
     readonly class: "blocker" | "major" | "minor";
@@ -60,9 +61,19 @@ export interface ReviewResult {
     readonly verdict: "clean" | "needs-fix";
 }
 
+export interface FindingDisposition {
+    readonly findingId: string;
+    readonly summary: string;
+}
+
 export interface FixResult {
-    readonly fixed: readonly string[];
-    readonly rejected: readonly string[];
+    readonly fixed: readonly FindingDisposition[];
+    readonly rejected: readonly FindingDisposition[];
+}
+
+/** narrows an unknown value to a string-keyed object */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export interface WaveRuntime {

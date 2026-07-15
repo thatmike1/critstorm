@@ -28,7 +28,7 @@ These are rules, not description. Violating one invalidates the wave.
 
 Tasks flow through 1–4 independently — no barrier between stages. Phase 5 is the orchestrator's.
 
-**1. Guard** — read-only, modifies nothing. Clean tree; main attached and synced to `origin/main`; `gh auth status` ok; quality gate green; the previous wave's dependency present as an exported symbol; record `baseSha`. Any failure aborts the whole wave before implementation spends a token.
+**1. Guard** — read-only with respect to the working tree; it may run `git fetch` to refresh remote refs. Clean tree; main attached and synced to `origin/main`; `gh auth status` ok; quality gate green; the previous wave's dependency present as an exported symbol; record `baseSha`. Any failure aborts the whole wave before implementation spends a token.
 
 **2. Implement** — one worker per issue, isolated worktree, all parallel. `npm ci`, branch from `origin/main`, read the design.md sections named in the spec, build, gate green, commit, push branch, `gh pr create` referencing the beads id.
 

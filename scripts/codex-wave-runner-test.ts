@@ -54,7 +54,10 @@ function createRuntime(
         review: vi.fn().mockImplementation(async (task) =>
             reviews[task.id] ?? { findings: [], verdict: "clean" },
         ),
-        fix: vi.fn().mockResolvedValue({ fixed: ["confirmed"], rejected: [] }),
+        fix: vi.fn().mockResolvedValue({
+            fixed: [{ findingId: "F2", summary: "confirmed" }],
+            rejected: [],
+        }),
     };
 }
 
@@ -110,12 +113,14 @@ describe("runWave", () => {
                     verdict: "needs-fix",
                     findings: [
                         {
+                            id: "F1",
                             file: "a.ts",
                             line: 4,
                             class: "minor",
                             summary: "small naming issue",
                         },
                         {
+                            id: "F2",
                             file: "a.ts",
                             line: 8,
                             class: "major",
@@ -136,7 +141,7 @@ describe("runWave", () => {
         );
         expect(result.tasks[0]?.nonMinorFindings).toBe(1);
         expect(result.tasks[0]?.fix).toEqual({
-            fixed: ["confirmed"],
+            fixed: [{ findingId: "F2", summary: "confirmed" }],
             rejected: [],
         });
     });
