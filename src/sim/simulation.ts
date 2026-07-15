@@ -36,6 +36,9 @@ const AMBIENT_BAND = 2; // keep a cell's chunk awake while |h - AMBIENT| > this
 // cell keeps re-emitting and would leave open-air quench broken.
 const LAVA_QUENCH_DELTA = 50;
 
+/** attraction passes per fixed step; two lets a placed magnet overcome one-cell gravity. */
+const PLACED_GOLD_MAGNET_PASSES = 2;
+
 /** persistent gold-routing source installed by the game structure layer. */
 interface GoldMagnet {
     x: number;
@@ -510,7 +513,7 @@ export class Simulation {
     }
 
     /**
-     * Nudge every matching cell in radius one step toward (attract) or away from
+     * nudge every matching cell in radius one step toward (attract) or away from
      * (repel) the target. Positions are SNAPSHOTTED first, then moved —
      * crucially NOT gated on the per-frame `stamp`, because the render loop runs
      * the sim step before this, so falling particles are already stamped this frame;
@@ -643,7 +646,11 @@ export class Simulation {
 
         // Structures route settled solid gold after gravity, but do not shield it:
         // molten gold keeps its normal liquid, burn, and dissolve interactions.
-        for (const magnet of this.goldMagnets) this.attractGold(magnet.x, magnet.y, magnet.radius);
+        for (const magnet of this.goldMagnets) {
+            for (let pass = 0; pass < PLACED_GOLD_MAGNET_PASSES; pass++) {
+                this.attractGold(magnet.x, magnet.y, magnet.radius);
+            }
+        }
 
         // Heat diffuses AFTER the material walk: sources deposit their temperature
         // for this frame (emission in updateFire/updateLava/ICE), then it spreads.

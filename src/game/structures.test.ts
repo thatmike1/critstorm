@@ -45,8 +45,23 @@ describe("magnet structure placement", () => {
 
         sim.step();
 
-        expect(sim.cells[15 * sim.W + 11]).toBe(Mat.GOLD);
-        expect(sim.getValue(11, 15)).toBe(100);
+        expect(sim.cells[15 * sim.W + 12]).toBe(Mat.GOLD);
+        expect(sim.getValue(12, 15)).toBe(100);
         expect(sim.totalValue()).toBe(totalBefore);
+    });
+
+    it("overcomes gravity when routing gold upward", () => {
+        const sim = new Simulation(40, 30);
+        const state = createState();
+        state.essence = structureById("magnet").cost;
+        expect(placeMagnet(sim, state, 20, 5)).toBe(true);
+        sim.cells[15 * sim.W + 20] = Mat.GOLD;
+        sim.addValue(20, 15, 100);
+
+        sim.step();
+
+        expect(sim.cells[14 * sim.W + 20]).toBe(Mat.GOLD);
+        expect(sim.getValue(20, 14)).toBe(100);
+        expect(sim.totalValue()).toBe(100);
     });
 });
