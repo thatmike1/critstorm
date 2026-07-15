@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { coresFromEssence } from "../src/game/economy";
+import { coresFromEssence, createState } from "../src/game/economy";
 import { bankAtN, neverRide, strategyByName } from "./bot-strategy";
-import { cumulativeEssenceAtMinutes, StormSimulator, type StormSummary } from "./storm-simulator";
+import {
+    cumulativeEssenceAtMinutes,
+    stepEconomy,
+    StormSimulator,
+    type StormSummary,
+} from "./storm-simulator";
 
 // the storm harness must be deterministic: a fixed seed reproduces the whole
 // run — economy rolls and the sim's internal randomness both flow from the seed.
@@ -19,6 +24,14 @@ function shortStorm(seed: number, strategyName = "bank-at-6"): StormSummary {
 }
 
 describe("storm simulator determinism", () => {
+    it("credits collected essence to the cumulative storm ledger", () => {
+        const economy = createState();
+        const { collected } = stepEconomy(economy, 1, () => 1);
+
+        expect(collected).toBeGreaterThan(0);
+        expect(economy.bankedEssence).toBe(collected);
+    });
+
     it("reproduces an identical summary for a fixed seed", () => {
         const a = shortStorm(1234);
         const b = shortStorm(1234);

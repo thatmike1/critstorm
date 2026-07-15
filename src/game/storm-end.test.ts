@@ -52,4 +52,11 @@ describe("storm-end accounting (design §5)", () => {
     it("does not grant the first-surge floor before a storm has reached a surge", () => {
         expect(endStorm(createState(), "blow-up").cores).toBe(0);
     });
+
+    it("does not convert spendable grants that did not pass through collection", () => {
+        const state = createState();
+        state.essence += 500;
+
+        expect(endStorm(state, "blow-up").rawCores).toBe(0);
+    });
 });

@@ -15,6 +15,7 @@ import {
     buy,
     canBuy,
     coresFromEssence,
+    creditEssence,
     createState,
     critChance,
     critMulti,
@@ -113,7 +114,7 @@ export function stepEconomy(
     let frameDamage = 0;
     for (const r of attacks) frameDamage += r.damage;
     const collected = valueToEssence(frameDamage);
-    economy.essence += collected;
+    creditEssence(economy, collected);
     const id = greedyBuy(economy);
     if (id) buy(economy, id);
     return { attacks, collected };

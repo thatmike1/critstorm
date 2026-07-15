@@ -170,7 +170,7 @@ export function App() {
             // the jackpot is a direct instant grant (design §4.3 bonus), so it
             // does NOT erupt collectable gold — erupting it would double-credit
             // once the collector drained that gold back into essence.
-            creditEssence(s, payout);
+            s.essence += payout;
             s.totalDamage += payout;
             engine?.spawn(payout, 5, true);
         };
