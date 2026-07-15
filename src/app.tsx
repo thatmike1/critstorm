@@ -29,6 +29,12 @@ import { Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
 import { StormEvents, createStormEventRng } from "./game/storm-events";
+import {
+    STRUCTURES,
+    canPlaceStructure,
+    placeMagnet,
+    type StructureId,
+} from "./game/structures";
 
 /** clicking heat: each manual click adds this much (0-100 scale) */
 const HEAT_PER_CLICK = 7;
@@ -137,6 +143,9 @@ export function App() {
     // stage fires a manual strike. when a brush is picked the stage becomes a
     // paint surface instead, and pointer drags paint that material for essence.
     const [selectedBrush, setSelectedBrush] = useState<BrushId | null>(null);
+    // structures use the same purchase flow as brushes but place once on click;
+    // they are never painted as a drag stroke.
+    const [selectedStructure, setSelectedStructure] = useState<StructureId | null>(null);
     const paintingRef = useRef(false);
     // surge-HUD edge trackers (design §3 legibility): the pot readout replays its
     // land animation only when the pot actually grows, and the ignition flash fires
@@ -279,8 +288,27 @@ export function App() {
         if (painted > 0) setHud(snapshot(stateRef.current));
     };
 
+    /** place the selected one-click structure at a screen position. */
+    const placeStructureAt = (clientX: number, clientY: number): void => {
+        const structureId = selectedStructure;
+        const engine = engineRef.current;
+        const rect = hostRef.current?.getBoundingClientRect();
+        if (!structureId || !engine || !rect || rect.width === 0 || rect.height === 0) return;
+        const sim = engine.simulation;
+        const gx = Math.floor(((clientX - rect.left) / rect.width) * sim.W);
+        const gy = Math.floor(((clientY - rect.top) / rect.height) * sim.H);
+        if (structureId === "magnet" && placeMagnet(sim, stateRef.current, gx, gy)) {
+            audioRef.current.buy();
+            setHud(snapshot(stateRef.current));
+        }
+    };
+
     const onStagePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
         audioRef.current.unlock();
+        if (selectedStructure) {
+            placeStructureAt(e.clientX, e.clientY);
+            return;
+        }
         if (selectedBrush) {
             paintingRef.current = true;
             audioRef.current.buy();
@@ -381,7 +409,15 @@ export function App() {
     /** pick a defense brush, or deselect it (back to attack mode) if re-clicked. */
     const toggleBrush = (id: BrushId) => {
         audioRef.current.unlock();
+        setSelectedStructure(null);
         setSelectedBrush((cur) => (cur === id ? null : id));
+    };
+
+    /** pick a one-click structure, or deselect it to return to attack mode. */
+    const toggleStructure = (id: StructureId) => {
+        audioRef.current.unlock();
+        setSelectedBrush(null);
+        setSelectedStructure((cur) => (cur === id ? null : id));
     };
 
     const surging = surgeHud.active;
@@ -400,7 +436,7 @@ export function App() {
                     "stage",
                     surging ? "frenzy" : "",
                     surgeHud.igniting ? "igniting" : "",
-                    selectedBrush ? "painting" : "",
+                    selectedBrush || selectedStructure ? "painting" : "",
                 ]
                     .filter(Boolean)
                     .join(" ")}
@@ -566,9 +602,31 @@ export function App() {
                         </button>
                     ))}
                 </div>
+                <div className="brushes">
+                    <div className="brushes-label">routing structures</div>
+                    {STRUCTURES.map((structure) => (
+                        <button
+                            key={structure.id}
+                            className={
+                                selectedStructure === structure.id ? "brush selected" : "brush"
+                            }
+                            disabled={
+                                selectedStructure !== structure.id &&
+                                !canPlaceStructure(stateRef.current, structure)
+                            }
+                            onClick={() => toggleStructure(structure.id)}
+                        >
+                            <span className="upgrade-name">{structure.name}</span>
+                            <span className="upgrade-desc">{structure.desc}</span>
+                            <span className="upgrade-cost">{formatNumber(structure.cost)}</span>
+                        </button>
+                    ))}
+                </div>
                 <p className="hint">
-                    {selectedBrush
-                        ? "drag on the storm to paint · click the brush again to attack"
+                    {selectedStructure
+                        ? "click clear air to place · click the structure again to attack"
+                        : selectedBrush
+                          ? "drag on the storm to paint · click the brush again to attack"
                         : "click anywhere to attack manually · catch falling 7 7 7"}
                 </p>
             </aside>

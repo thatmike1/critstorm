@@ -258,6 +258,20 @@ describe("metal & magnet", () => {
         expect(filingsSpreadX(s)).toBeGreaterThan(before + 1);
     });
 
+    it("attracts solid gold and carries its value through the routing swap", () => {
+        const s = fresh();
+        s.paint(10, 20, 0, Mat.GOLD);
+        s.addValue(10, 20, 250);
+        const before = s.totalValue();
+
+        s.attractGold(20, 20, 15);
+
+        expect(s.cells[idx(11, 20)]).toBe(Mat.GOLD);
+        expect(s.getValue(11, 20)).toBe(250);
+        expect(s.getValue(10, 20)).toBe(0);
+        expect(s.totalValue()).toBeCloseTo(before);
+    });
+
     it("lightning treats metal as a conductor and arcs through it", () => {
         const s = fresh();
         for (let x = 0; x < W; x++) s.paint(x, 10, 0, Mat.METAL); // full-width slab

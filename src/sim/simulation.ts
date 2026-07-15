@@ -36,6 +36,16 @@ const AMBIENT_BAND = 2; // keep a cell's chunk awake while |h - AMBIENT| > this
 // cell keeps re-emitting and would leave open-air quench broken.
 const LAVA_QUENCH_DELTA = 50;
 
+/** attraction passes per fixed step; two lets a placed magnet overcome one-cell gravity. */
+const PLACED_GOLD_MAGNET_PASSES = 2;
+
+/** persistent gold-routing source installed by the game structure layer. */
+interface GoldMagnet {
+    x: number;
+    y: number;
+    radius: number;
+}
+
 // Background color (matches the canvas frame in CSS).
 const BG_R = 16,
     BG_G = 18,
@@ -123,6 +133,8 @@ export class Simulation {
     // GOLD<->MOLTEN_GOLD melt/freeze pair). read/written via getValue/addValue.
     // allocated ONCE alongside the grid and never reallocated.
     readonly value: Float32Array;
+    /** placed structure fields applied after each fixed simulation step. */
+    private goldMagnets: GoldMagnet[] = [];
 
     frame = 0;
     count = 0;
@@ -478,40 +490,38 @@ export class Simulation {
         this.bolt(sx, sy, 0, this.H + 40);
     }
 
-    /** try to slide a filing one cell toward (tx,ty); succeeds into empty or a
-     * lighter movable (so it can be dragged up through water). */
-    private tryMagnetMove(x: number, y: number, tx: number, ty: number): boolean {
+    /** try to slide `mat` one cell toward (tx,ty), carrying its value through a swap. */
+    private tryMagnetMove(x: number, y: number, tx: number, ty: number, mat: number): boolean {
         if (tx < 0 || ty < 0 || tx >= this.W || ty >= this.H) return false;
         const tm = this.cells[ty * this.W + tx];
         if (tm === Mat.EMPTY) {
             this.swap(x, y, tx, ty);
             return true;
         }
-        if (isMovable(tm) && density[Mat.FILINGS] > density[tm]) {
+        if (isMovable(tm) && density[mat] > density[tm]) {
             this.swap(x, y, tx, ty);
             return true;
         }
         return false;
     }
 
-    /** step a filing one cell along (sx,sy), falling back to the cardinal axes so
-     * it still makes progress when the diagonal is blocked. */
-    private pullStep(x: number, y: number, sx: number, sy: number): void {
-        if (sx !== 0 && sy !== 0 && this.tryMagnetMove(x, y, x + sx, y + sy)) return;
-        if (sx !== 0 && this.tryMagnetMove(x, y, x + sx, y)) return;
-        if (sy !== 0 && this.tryMagnetMove(x, y, x, y + sy)) return;
+    /** step `mat` one cell along (sx,sy), falling back to cardinal axes when blocked. */
+    private pullStep(x: number, y: number, sx: number, sy: number, mat: number): void {
+        if (sx !== 0 && sy !== 0 && this.tryMagnetMove(x, y, x + sx, y + sy, mat)) return;
+        if (sx !== 0 && this.tryMagnetMove(x, y, x + sx, y, mat)) return;
+        if (sy !== 0 && this.tryMagnetMove(x, y, x, y + sy, mat)) return;
     }
 
     /**
-     * Magnet tool: nudge every FILINGS cell in radius one step toward (attract) or
-     * away from (repel) the pointer. Positions are SNAPSHOTTED first, then moved —
+     * nudge every matching cell in radius one step toward (attract) or away from
+     * (repel) the target. Positions are SNAPSHOTTED first, then moved —
      * crucially NOT gated on the per-frame `stamp`, because the render loop runs
-     * the sim step before this, so falling filings are already stamped this frame;
+     * the sim step before this, so falling particles are already stamped this frame;
      * a stamp guard would let gravity always win and the magnet would feel dead.
-     * Snapshotting instead guarantees each filing is considered exactly once.
-     * Nearest-to-pointer filings move first so inner ones clear room for the rest.
+     * Snapshotting instead guarantees each particle is considered exactly once.
+     * Nearest-to-target particles move first so inner cells clear room for the rest.
      */
-    magnet(cx: number, cy: number, r: number, attract: boolean): void {
+    private pullMaterial(cx: number, cy: number, r: number, attract: boolean, mat: number): void {
         const r2 = r * r;
         const pts: Array<{ x: number; y: number; d: number }> = [];
         for (let dy = -r; dy <= r; dy++) {
@@ -522,23 +532,39 @@ export class Simulation {
                 if (d > r2) continue;
                 const x = cx + dx;
                 if (x < 0 || x >= this.W) continue;
-                if (this.cells[y * this.W + x] === Mat.FILINGS) pts.push({ x, y, d });
+                if (this.cells[y * this.W + x] === mat) pts.push({ x, y, d });
             }
         }
         // attract: pull the closest first (they vacate cells the outer ones flow
         // into); repel: push the farthest first so the column unpacks outward.
         pts.sort((a, b) => (attract ? a.d - b.d : b.d - a.d));
         for (const p of pts) {
-            if (this.cells[p.y * this.W + p.x] !== Mat.FILINGS) continue; // moved already
+            if (this.cells[p.y * this.W + p.x] !== mat) continue; // moved already
             let sx = p.x < cx ? 1 : p.x > cx ? -1 : 0;
             let sy = p.y < cy ? 1 : p.y > cy ? -1 : 0;
             if (!attract) {
                 sx = -sx;
                 sy = -sy;
             }
-            if (sx === 0 && sy === 0) continue; // sitting on the pointer
-            this.pullStep(p.x, p.y, sx, sy);
+            if (sx === 0 && sy === 0) continue; // sitting on the target
+            this.pullStep(p.x, p.y, sx, sy, mat);
         }
+    }
+
+    /** pull FILINGS toward or away from a transient pointer magnet. */
+    magnet(cx: number, cy: number, r: number, attract: boolean): void {
+        this.pullMaterial(cx, cy, r, attract, Mat.FILINGS);
+    }
+
+    /** pull solid GOLD toward a placed magnet without affecting molten gold or heat. */
+    attractGold(cx: number, cy: number, r: number): void {
+        this.pullMaterial(cx, cy, r, true, Mat.GOLD);
+    }
+
+    /** register a fixed gold-routing magnet that runs once per simulation step. */
+    addGoldMagnet(x: number, y: number, radius: number): void {
+        if (x < 0 || y < 0 || x >= this.W || y >= this.H || radius <= 0) return;
+        this.goldMagnets.push({ x, y, radius });
     }
 
     clear(): void {
@@ -546,6 +572,7 @@ export class Simulation {
         this.life.fill(0);
         this.heat.fill(AMBIENT);
         this.value.fill(0);
+        this.goldMagnets = [];
         this.activeNext.fill(1);
     }
 
@@ -578,6 +605,7 @@ export class Simulation {
             this.assignSpawnHeat(i, this.cells[i]);
         }
         this.stamp.fill(-1);
+        this.goldMagnets = [];
         this.activeNext.fill(1);
         return true;
     }
@@ -613,6 +641,14 @@ export class Simulation {
                     if (dir > 0) for (let x = x0; x < x1; x++) this.update(x, y);
                     else for (let x = x1 - 1; x >= x0; x--) this.update(x, y);
                 }
+            }
+        }
+
+        // Structures route settled solid gold after gravity, but do not shield it:
+        // molten gold keeps its normal liquid, burn, and dissolve interactions.
+        for (const magnet of this.goldMagnets) {
+            for (let pass = 0; pass < PLACED_GOLD_MAGNET_PASSES; pass++) {
+                this.attractGold(magnet.x, magnet.y, magnet.radius);
             }
         }
 
