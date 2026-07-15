@@ -65,28 +65,28 @@ The wave is a `Workflow` script (see `~/.claude/critstorm-wave-4/wave-*.js`). `p
 
 ## Harness: Codex
 
-Codex has subagents (`spawn_agent`, `spawn_agents_on_csv`, `close_agent`, `report_agent_job_result`; agent defs as TOML in `.codex/agents/`) but **no scripted orchestration** — spawning is model-driven, decided inside the parent's reasoning chain. There is no deterministic control flow.
+The Codex harness is [`scripts/run-codex-wave.ts`](./scripts/run-codex-wave.ts), driven by a typed definition under [`waves/`](./waves/). The orchestrator invokes it once, then integrates only when it returns a `ready-to-integrate` manifest.
 
-Consequence: **this document is the enforcement.** Sol must uphold by discipline what the Workflow script upholds structurally. Specifically Sol must, unprompted:
+The runner provides the control flow that native model-driven subagents do not:
 
-- run Guard and honour an abort
-- hold the conditional on Fix (skip it when findings are all minor)
-- pass each task's spec verbatim to both implementer and reviewer
-- refuse to let any worker merge or approve
-- do the sequential merge itself
+- Guard is deterministic shell code and aborts before any model runs.
+- Each task gets an isolated Git worktree and its own non-interactive `codex exec` process.
+- The task spec is one string passed unchanged to Implement and Review.
+- Implement and Fix workers only edit files. The runner owns gates, commits, pushes, and PR creation.
+- Review runs read-only. The runner alone posts `gh pr review --comment`, so a reviewer cannot approve or request changes.
+- Fix receives only blocker/major findings and must disposition every claim.
+- Four task pipelines may run concurrently; each advances independently through Implement → Review → optional Fix.
+- Workers run with Codex multi-agent delegation disabled.
+- The runner stops before integration. The Sol orchestrator rebases, resolves collisions, gates, merges, closes beads, and pushes.
 
-`spawn_agents_on_csv` fits the Implement fan-out — one CSV row per task, `{column}` templating into the instruction, `max_concurrency`, output CSV. It is data-driven fan-out, not control flow: no guard gate and no conditional Fix. Wrap it, don't rely on it.
+Every execution requires an exact green-light argument. Validation is safe and does not start a wave:
 
-Concurrency lives in `~/.codex/config.toml`:
-
-```toml
-[agents]
-max_threads = 4                # default 6
-max_depth = 1                  # workers cannot spawn workers
-job_max_runtime_seconds = 900
+```bash
+npm run wave:6a -- --check
+npm run wave:6a -- --green-lit critstorm-wave-6a
 ```
 
-`max_depth = 1` matches the wave shape — orchestrator spawns workers, workers spawn nothing.
+The runner writes its integration manifest to `/tmp/<wave-name>-manifest.json`. An `aborted` or `failed` manifest forbids integration. Failed-task worktrees are deliberately retained for diagnosis; successful-task worktrees are removed after their PR pipeline completes.
 
 ## Task specs
 
