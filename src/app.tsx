@@ -28,6 +28,7 @@ import { Collector, defaultCollectorRegion } from "./game/collector";
 import { Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
+import { StormEvents, createStormEventRng } from "./game/storm-events";
 
 /** clicking heat: each manual click adds this much (0-100 scale) */
 const HEAT_PER_CLICK = 7;
@@ -37,10 +38,6 @@ const HEAT_DECAY = 16;
 
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;
-
-/** jackpot token cadence: next drop lands uniformly in this range (seconds) */
-const BONUS_MIN_GAP = 30;
-const BONUS_MAX_GAP = 90;
 
 /** snapshot of economy values the HUD renders each frame */
 interface HudState {
@@ -78,8 +75,7 @@ function snapshot(s: EconomyState): HudState {
 }
 
 /**
- * dev cheats: ?lv=base,chance,multi,rate,golden jumps to a late-game state,
- * ?bonusin=SECONDS forces the first jackpot token drop
+ * dev cheat: ?lv=base,chance,multi,rate,golden jumps to a late-game state
  */
 function createInitialState(): EconomyState {
     const s = createState();
@@ -95,12 +91,6 @@ function createInitialState(): EconomyState {
         };
     }
     return s;
-}
-
-function firstBonusDelay(): number {
-    const forced = new URLSearchParams(window.location.search).get("bonusin");
-    if (forced) return Number(forced);
-    return BONUS_MIN_GAP + Math.random() * (BONUS_MAX_GAP - BONUS_MIN_GAP);
 }
 
 export function App() {
@@ -123,7 +113,7 @@ export function App() {
             },
         })
     );
-    const nextBonusRef = useRef(firstBonusDelay());
+    const stormEventsRef = useRef<StormEvents | null>(null);
     const [hud, setHud] = useState<HudState>(() => snapshot(stateRef.current));
     const [muted, setMuted] = useState(false);
     const [cps, setCps] = useState(0);
@@ -163,23 +153,6 @@ export function App() {
         let hudTimer = 0;
         let cancelled = false;
 
-        const catchBonus = () => {
-            const s = stateRef.current;
-            audioRef.current.jackpot();
-            const payout = Math.max(expectedDps(s) * 30, 100);
-            // the jackpot is a direct instant grant (design §4.3 bonus), so it
-            // does NOT erupt collectable gold — erupting it would double-credit
-            // once the collector drained that gold back into essence.
-            s.essence += payout;
-            s.totalDamage += payout;
-            engine?.spawn(payout, 5, true);
-        };
-
-        const scheduleBonus = (elapsed: number) => {
-            nextBonusRef.current =
-                elapsed + BONUS_MIN_GAP + Math.random() * (BONUS_MAX_GAP - BONUS_MIN_GAP);
-        };
-
         CritEngine.create(hostRef.current!).then((e) => {
             if (cancelled) {
                 e.destroy();
@@ -187,6 +160,10 @@ export function App() {
             }
             engine = e;
             engineRef.current = e;
+            // storm events replace the old falling-777 bonus with deterministic
+            // in-world pressure (design §4.4). its rng is isolated from combat rolls
+            // so the same storm duration always schedules the same world events.
+            stormEventsRef.current = new StormEvents(e.storm, createStormEventRng(0x5700_7001));
             // the drain: solid gold settling in this band becomes essence at
             // (1 - fee). essence now flows ONLY through here (applyAttack no longer
             // credits it), so an attack pays out only once its gold reaches home.
@@ -236,10 +213,7 @@ export function App() {
                 // core reacts in a fixed order as the core heats toward critical, so the
                 // ride reads. consumes coreLoad only; 0 while idle clears the tells.
                 engine!.applyTells(surge.active ? surge.coreLoad : 0);
-                if (s.elapsed >= nextBonusRef.current) {
-                    engine!.spawnBonus(catchBonus);
-                    scheduleBonus(s.elapsed);
-                }
+                stormEventsRef.current?.tick(s.elapsed);
                 hudTimer += dt;
                 if (hudTimer >= 0.1) {
                     hudTimer = 0;
@@ -278,6 +252,7 @@ export function App() {
         return () => {
             cancelled = true;
             cancelAnimationFrame(raf);
+            stormEventsRef.current = null;
             engine?.destroy();
             engineRef.current = null;
         };
