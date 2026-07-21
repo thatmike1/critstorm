@@ -12,6 +12,7 @@
  * wiring is in place so it activates without reworking this loop.
  */
 import {
+    applyAttack,
     buy,
     canBuy,
     coresFromEssence,
@@ -19,8 +20,10 @@ import {
     createState,
     critChance,
     critMulti,
+    expectedDamagePerAttack,
     expectedDps,
     rankInfo,
+    rollAttack,
     tick,
     upgradeCost,
     UPGRADES,
@@ -29,6 +32,15 @@ import {
     type EconomyState,
     type UpgradeId,
 } from "../src/game/economy";
+import {
+    autoStrikerInterval,
+    autoStrikerUpgradeCost,
+    canUpgradeAutoStriker,
+    createAutoStrikerState,
+    tickAutoStriker,
+    upgradeAutoStriker,
+    type AutoStrikerState,
+} from "../src/game/auto-striker";
 import { Simulation } from "../src/sim/simulation";
 import { mulberry32, withSeededRandom, type Rng } from "./rng";
 import type { BotStrategy, StormView } from "./bot-strategy";
@@ -97,26 +109,84 @@ export interface StormSummary {
     samples: MinuteSample[];
 }
 
+/** expected manual-plus-turret dps for the headless one-click-per-second bot. */
+function progressionDps(economy: EconomyState, autoStriker: AutoStrikerState): number {
+    const turretRate = autoStriker.level > 0 ? 1 / autoStrikerInterval(autoStriker) : 0;
+    return expectedDamagePerAttack(economy) * (1 + turretRate);
+}
+
+/** buy the early turret first, then choose the best dps gain per essence. */
+function buyProgressionUpgrade(economy: EconomyState, autoStriker: AutoStrikerState): void {
+    if (autoStriker.level === 0) {
+        if (canUpgradeAutoStriker(economy, autoStriker)) {
+            upgradeAutoStriker(economy, autoStriker);
+            return;
+        }
+        // establish cheap base damage, then save for the early automation handoff.
+        if (economy.levels.baseDamage >= 5) return;
+    }
+
+    const turretAffordable = canUpgradeAutoStriker(economy, autoStriker);
+    let economyUpgradeAffordable = false;
+    for (const upgrade of UPGRADES) {
+        if (canBuy(economy, upgrade.id)) {
+            economyUpgradeAffordable = true;
+            break;
+        }
+    }
+    if (!turretAffordable && !economyUpgradeAffordable) return;
+
+    const before = progressionDps(economy, autoStriker);
+    let bestUpgrade: UpgradeId | null = null;
+    let bestRatio = 0;
+    for (const upgrade of UPGRADES) {
+        if (!canBuy(economy, upgrade.id)) continue;
+        const cost = upgradeCost(economy, upgrade.id);
+        economy.levels[upgrade.id] += 1;
+        const ratio = (progressionDps(economy, autoStriker) - before) / cost;
+        economy.levels[upgrade.id] -= 1;
+        if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestUpgrade = upgrade.id;
+        }
+    }
+
+    let buyTurretUpgrade = false;
+    if (turretAffordable) {
+        const cost = autoStrikerUpgradeCost(autoStriker);
+        autoStriker.level += 1;
+        const ratio = (progressionDps(economy, autoStriker) - before) / cost;
+        autoStriker.level -= 1;
+        buyTurretUpgrade = ratio > bestRatio;
+    }
+
+    if (buyTurretUpgrade) upgradeAutoStriker(economy, autoStriker);
+    else if (bestUpgrade) buy(economy, bestUpgrade);
+}
+
 /**
- * advance one frame of the pure in-storm economy: roll the frame's attacks, credit
- * the collected essence (design §4.3, whole-payout at the base fee — see the run
- * loop), then greedy-buy one upgrade. returns the attacks rolled and the essence
- * collected this frame. the physical sim never touches essence, so the §6
- * anti-farming trajectory ({@link cumulativeEssenceAtMinutes}) runs this alone,
- * while {@link StormSimulator} wraps it with the sim strikes/steps and sampling.
+ * advance one frame of the pure in-storm economy: roll one-click-per-second manual
+ * attacks plus the purchased auto-striker, credit their collected essence, then buy
+ * one progression upgrade. the physical sim never touches essence, so the §6
+ * anti-farming trajectory ({@link cumulativeEssenceAtMinutes}) runs this alone.
  */
 export function stepEconomy(
     economy: EconomyState,
     stepSec: number,
-    rng: Rng
+    rng: Rng,
+    autoStriker: AutoStrikerState = createAutoStrikerState()
 ): { attacks: AttackResult[]; collected: number } {
     const attacks = tick(economy, stepSec, rng);
+    tickAutoStriker(autoStriker, stepSec, () => {
+        const result = rollAttack(economy, rng);
+        applyAttack(economy, result);
+        attacks.push(result);
+    });
     let frameDamage = 0;
-    for (const r of attacks) frameDamage += r.damage;
+    for (const result of attacks) frameDamage += result.damage;
     const collected = valueToEssence(frameDamage);
     creditEssence(economy, collected);
-    const id = greedyBuy(economy);
-    if (id) buy(economy, id);
+    buyProgressionUpgrade(economy, autoStriker);
     return { attacks, collected };
 }
 
@@ -139,6 +209,7 @@ export function cumulativeEssenceAtMinutes(
 ): Map<number, number> {
     const rng = mulberry32(seed | 0);
     const economy = createState();
+    const autoStriker = createAutoStrikerState();
     // targets in seconds, ascending; supports fractional-minute marks (e.g. the
     // 90 s first-surge mark) as well as the whole-minute arc.
     const targets = [...new Set(minutes)].sort((a, b) => a - b).map((m) => ({ m, sec: m * 60 }));
@@ -152,7 +223,7 @@ export function cumulativeEssenceAtMinutes(
     // mirror StormSimulator.runInner: credit the frame first, then record any mark the
     // frame just crossed, so a whole-minute mark's total matches a real run's MinuteSample.
     for (let frame = 0; frame < totalFrames && ti < targets.length; frame++) {
-        cumulative += stepEconomy(economy, stepSec, rng).collected;
+        cumulative += stepEconomy(economy, stepSec, rng, autoStriker).collected;
         while (ti < targets.length && economy.elapsed >= targets[ti].sec) {
             out.set(targets[ti].m, cumulative);
             ti++;
@@ -211,6 +282,7 @@ export class StormSimulator {
         const { durationSec, stepSec, gridW, gridH, strategy } = this.cfg;
         const sim = new Simulation(gridW, gridH);
         const economy = createState();
+        const autoStriker = createAutoStrikerState();
 
         // the core sits high-centre; strikes rain down from it and its cell
         // temperature is the overheat instrument the strategy reads (§3).
@@ -237,8 +309,13 @@ export class StormSimulator {
             // a competent bot routes its whole payout to the collector, minted at the
             // base fee; the headless harness has no spatial routing), greedy-buy once.
             // this is the essence source that makes the in-storm economy compound
-            // (attackRate → crit → multi) instead of sitting at zero.
-            const { attacks: results, collected } = stepEconomy(economy, stepSec, this.economyRng);
+            // (base cadence → crit → multi) instead of sitting at zero.
+            const { attacks: results, collected } = stepEconomy(
+                economy,
+                stepSec,
+                this.economyRng,
+                autoStriker
+            );
             cumulativeEssence += collected;
             this.tally(results, (r) => {
                 attacks++;
@@ -270,7 +347,9 @@ export class StormSimulator {
             }
 
             if (economy.elapsed >= nextSampleAt) {
-                samples.push(sample(economy, sim.heat[coreIdx], nextSampleAt, cumulativeEssence));
+                samples.push(
+                    sample(economy, autoStriker, sim.heat[coreIdx], nextSampleAt, cumulativeEssence)
+                );
                 nextSampleAt += 60;
             }
         }
@@ -283,7 +362,7 @@ export class StormSimulator {
             cumulativeEssence,
             cores: coresFromEssence(cumulativeEssence),
             totalDamage: economy.totalDamage,
-            finalDps: expectedDps(economy),
+            finalDps: progressionDps(economy, autoStriker),
             attacks,
             crits,
             goldenHits,
@@ -313,6 +392,7 @@ function pickNotable(results: AttackResult[]): AttackResult | null {
 /** build a per-minute sample row from the current state */
 function sample(
     economy: EconomyState,
+    autoStriker: AutoStrikerState,
     coreTemp: number,
     atSec: number,
     cumulativeEssence: number
@@ -322,7 +402,7 @@ function sample(
         essence: economy.essence,
         cumulativeEssence,
         cores: coresFromEssence(cumulativeEssence),
-        dps: expectedDps(economy),
+        dps: progressionDps(economy, autoStriker),
         totalDamage: economy.totalDamage,
         critPct: critChance(economy) * 100,
         multi: critMulti(economy),

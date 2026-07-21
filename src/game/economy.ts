@@ -1,5 +1,5 @@
-/** upgrade identifiers */
-export type UpgradeId = "baseDamage" | "critChance" | "critMulti" | "attackRate" | "golden";
+/** purchasable in-storm upgrade identifiers. */
+export type UpgradeId = "baseDamage" | "critChance" | "critMulti" | "golden";
 
 export interface UpgradeDef {
     id: UpgradeId;
@@ -34,14 +34,6 @@ export const UPGRADES: UpgradeDef[] = [
         baseCost: 25,
         costGrowth: 1.3,
         maxLevel: 200,
-    },
-    {
-        id: "attackRate",
-        name: "Faster Reels",
-        desc: "+0.25 attacks/sec",
-        baseCost: 10,
-        costGrowth: 1.18,
-        maxLevel: 60,
     },
     {
         id: "golden",
@@ -87,7 +79,7 @@ export function createState(): EconomyState {
         totalDamage: 0,
         elapsed: 0,
         attackTimer: 0,
-        levels: { baseDamage: 0, critChance: 0, critMulti: 0, attackRate: 0, golden: 0 },
+        levels: { baseDamage: 0, critChance: 0, critMulti: 0, golden: 0 },
     };
 }
 
@@ -103,8 +95,9 @@ export function critMulti(s: EconomyState): number {
     return 2 + s.levels.critMulti * 0.15;
 }
 
-export function attacksPerSec(s: EconomyState): number {
-    return 1 + s.levels.attackRate * 0.25;
+/** fixed one-strike-per-second cadence used only by the headless balance harness. */
+export function attacksPerSec(_s: EconomyState): number {
+    return 1;
 }
 
 export function goldenChance(s: EconomyState): number {
