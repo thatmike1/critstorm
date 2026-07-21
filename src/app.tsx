@@ -4,18 +4,13 @@ import { AudioEngine } from "./game/audio";
 import {
     createState,
     creditEssence,
-    tick,
     buy,
     canBuy,
     upgradeCost,
-    rollAttack,
-    applyAttack,
-    expectedDps,
+    expectedDamagePerAttack,
     critChance,
     critMulti,
-    attacksPerSec,
     goldenChance,
-    baseDamage,
     rankInfo,
     UPGRADES,
     type EconomyState,
@@ -29,15 +24,19 @@ import { Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
 import { StormEvents, createStormEventRng } from "./game/storm-events";
+import { STRUCTURES, canPlaceStructure, placeMagnet, type StructureId } from "./game/structures";
 import {
-    STRUCTURES,
-    canPlaceStructure,
-    placeMagnet,
-    type StructureId,
-} from "./game/structures";
-
-/** clicking heat: each manual click adds this much (0-100 scale) */
-const HEAT_PER_CLICK = 7;
+    AUTO_STRIKER_MAX_LEVEL,
+    autoStrikerInterval,
+    autoStrikerUpgradeCost,
+    canUpgradeAutoStriker,
+    createAutoStrikerState,
+    executeStrike,
+    tickAutoStriker,
+    upgradeAutoStriker,
+    type AutoStrikerState,
+    type StrikeTarget,
+} from "./game/auto-striker";
 
 /** heat decay per second — stop clicking and the meter drains (pre-surge only) */
 const HEAT_DECAY = 16;
@@ -45,63 +44,82 @@ const HEAT_DECAY = 16;
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;
 
-/** snapshot of economy values the HUD renders each frame */
+/** snapshot of economy and auto-striker values the HUD renders each frame. */
 interface HudState {
     essence: number;
     dps: number;
     critChance: number;
     critMulti: number;
-    attacksPerSec: number;
     goldenChance: number;
     rank: RankInfo;
     levels: Record<UpgradeId, number>;
     costs: Record<UpgradeId, number>;
     affordable: Record<UpgradeId, boolean>;
+    autoStrikerLevel: number;
+    autoStrikerInterval: number;
+    autoStrikerCost: number;
+    autoStrikerAffordable: boolean;
 }
 
-function snapshot(s: EconomyState): HudState {
+interface InitialGameState {
+    economy: EconomyState;
+    autoStriker: AutoStrikerState;
+}
+
+/** build the render snapshot from the mutable game-state refs. */
+function snapshot(s: EconomyState, autoStriker: AutoStrikerState): HudState {
     const costs = {} as Record<UpgradeId, number>;
     const affordable = {} as Record<UpgradeId, boolean>;
     for (const u of UPGRADES) {
         costs[u.id] = upgradeCost(s, u.id);
         affordable[u.id] = canBuy(s, u.id);
     }
+    const interval = autoStrikerInterval(autoStriker);
     return {
         essence: s.essence,
-        dps: expectedDps(s),
+        dps: autoStriker.level > 0 ? expectedDamagePerAttack(s) / interval : 0,
         critChance: critChance(s),
         critMulti: critMulti(s),
-        attacksPerSec: attacksPerSec(s),
         goldenChance: goldenChance(s),
         rank: rankInfo(s),
         levels: { ...s.levels },
         costs,
         affordable,
+        autoStrikerLevel: autoStriker.level,
+        autoStrikerInterval: interval,
+        autoStrikerCost: autoStrikerUpgradeCost(autoStriker),
+        autoStrikerAffordable: canUpgradeAutoStriker(s, autoStriker),
     };
 }
 
 /**
- * dev cheat: ?lv=base,chance,multi,rate,golden jumps to a late-game state
+ * migrate the legacy ?lv=base,chance,multi,rate,golden cheat by mapping its removed
+ * rate slot onto the auto-striker level while preserving the remaining upgrades.
  */
-function createInitialState(): EconomyState {
-    const s = createState();
+function createInitialState(): InitialGameState {
+    const economy = createState();
+    let autoStriker = createAutoStrikerState();
     const lv = new URLSearchParams(window.location.search).get("lv");
     if (lv) {
-        const [base = 0, chance = 0, multi = 0, rate = 0, golden = 0] = lv.split(",").map(Number);
-        s.levels = {
+        const [base = 0, chance = 0, multi = 0, legacyRate = 0, golden = 0] = lv
+            .split(",")
+            .map(Number);
+        economy.levels = {
             baseDamage: base,
             critChance: chance,
             critMulti: multi,
-            attackRate: rate,
             golden,
         };
+        autoStriker = createAutoStrikerState(legacyRate);
     }
-    return s;
+    return { economy, autoStriker };
 }
 
 export function App() {
+    const [initialState] = useState(createInitialState);
     const hostRef = useRef<HTMLDivElement>(null);
-    const stateRef = useRef<EconomyState>(createInitialState());
+    const stateRef = useRef<EconomyState>(initialState.economy);
+    const autoStrikerRef = useRef<AutoStrikerState>(initialState.autoStriker);
     const engineRef = useRef<CritEngine | null>(null);
     const audioRef = useRef<AudioEngine>(new AudioEngine());
     const clickTimesRef = useRef<number[]>([]);
@@ -120,7 +138,9 @@ export function App() {
         })
     );
     const stormEventsRef = useRef<StormEvents | null>(null);
-    const [hud, setHud] = useState<HudState>(() => snapshot(stateRef.current));
+    const [hud, setHud] = useState<HudState>(() =>
+        snapshot(stateRef.current, autoStrikerRef.current)
+    );
     const [muted, setMuted] = useState(false);
     const [cps, setCps] = useState(0);
     const [heat, setHeat] = useState(0);
@@ -155,6 +175,30 @@ export function App() {
     const captureSeqRef = useRef(0);
     const igniteUntilRef = useRef(0);
 
+    /** run manual and turret attacks through one heat, roll, capture, and eruption path. */
+    const runStrike = (target?: StrikeTarget): void => {
+        executeStrike(
+            stateRef.current,
+            surgeRef.current,
+            Math.random,
+            {
+                onSurgeStart: () => {
+                    markFirstSurge(stateRef.current);
+                    audioRef.current.frenzy();
+                },
+                onStrike: (result, captured, strikeTarget) => {
+                    engineRef.current?.spawn(result.damage, result.tier, result.golden);
+                    if (!captured) {
+                        engineRef.current?.erupt(result.damage, result.tier, strikeTarget);
+                    }
+                    audioRef.current.attack(Math.max(result.tier, 1));
+                    if (result.golden) audioRef.current.golden();
+                },
+            },
+            target
+        );
+    };
+
     useEffect(() => {
         let engine: CritEngine | null = null;
         let raf = 0;
@@ -169,6 +213,7 @@ export function App() {
             }
             engine = e;
             engineRef.current = e;
+            e.setAutoStrikerOwned(autoStrikerRef.current.level > 0);
             // storm events replace the old falling-777 bonus with deterministic
             // in-world pressure (design §4.4). its rng is isolated from combat rolls
             // so the same storm duration always schedules the same world events.
@@ -185,27 +230,16 @@ export function App() {
                 last = now;
                 const s = stateRef.current;
                 const surge = surgeRef.current;
-                const results = tick(s, dt, Math.random);
+                s.elapsed += dt;
+                tickAutoStriker(autoStrikerRef.current, dt, () => {
+                    engine!.pulseAutoStriker();
+                    runStrike();
+                });
                 const drained = collector.collect(e.simulation);
                 creditEssence(s, drained);
                 // pulse the drain grate the frame it converts gold, so essence income
                 // visibly originates FROM the drain rather than appearing on the HUD.
                 if (drained > 0) engine!.pulseDrain();
-                for (const r of results) {
-                    engine!.spawn(r.damage, r.tier, r.golden);
-                    // inside a surge, every strike folds into the pot (design §3).
-                    // de-dup (hkm.3): a captured strike must NOT also erupt as
-                    // collectable world gold — that would double-credit (pot + world).
-                    // the return value, not surge.active, decides: a crit that busts
-                    // the surge deactivates it mid-call yet was still captured (and
-                    // burned with the pot), so it must not leak out (critstorm-cjs).
-                    // outside a surge it erupts normally (auto-strikes have no cursor,
-                    // so they land at a random strike-zone point) and feeds the drain.
-                    const captured = surge.recordStrike(r, baseDamage(s));
-                    if (!captured) engine!.erupt(r.damage, r.tier);
-                    audioRef.current.attack(r.tier);
-                    if (r.golden) audioRef.current.golden();
-                }
                 // heat drains only pre-surge; during a surge the machine ignores it.
                 surge.decayHeat(HEAT_DECAY * dt);
                 // drive the surge core-heat model (design §3, hkm.2): the ambient ramp
@@ -251,7 +285,7 @@ export function App() {
                         captureSeq: captureSeqRef.current,
                         igniting: surge.active && now < igniteUntilRef.current,
                     });
-                    setHud(snapshot(s));
+                    setHud(snapshot(s, autoStrikerRef.current));
                 }
                 raf = requestAnimationFrame(frame);
             };
@@ -285,7 +319,7 @@ export function App() {
         const gx = Math.floor(((clientX - rect.left) / rect.width) * sim.W);
         const gy = Math.floor(((clientY - rect.top) / rect.height) * sim.H);
         const painted = paintBrush(sim, stateRef.current, brush, gx, gy);
-        if (painted > 0) setHud(snapshot(stateRef.current));
+        if (painted > 0) setHud(snapshot(stateRef.current, autoStrikerRef.current));
     };
 
     /** place the selected one-click structure at a screen position. */
@@ -299,7 +333,7 @@ export function App() {
         const gy = Math.floor(((clientY - rect.top) / rect.height) * sim.H);
         if (structureId === "magnet" && placeMagnet(sim, stateRef.current, gx, gy)) {
             audioRef.current.buy();
-            setHud(snapshot(stateRef.current));
+            setHud(snapshot(stateRef.current, autoStrikerRef.current));
         }
     };
 
@@ -329,33 +363,11 @@ export function App() {
 
     const manualAttack = (e: ReactPointerEvent<HTMLDivElement>) => {
         audioRef.current.unlock();
-        const s = stateRef.current;
         clickTimesRef.current.push(performance.now());
-        // aim the eruption at the click position, in host-local (canvas) px.
+        // aim the eruption at the click position, in host-local canvas pixels.
         const rect = hostRef.current?.getBoundingClientRect();
         const target = rect ? { x: e.clientX - rect.left, y: e.clientY - rect.top } : undefined;
-        // a click fills the heat meter; when it tops out a surge ignites (design §3).
-        const surge = surgeRef.current;
-        if (surge.addHeat(HEAT_PER_CLICK)) {
-            markFirstSurge(s);
-            audioRef.current.frenzy();
-        }
-        const r = rollAttack(s, Math.random);
-        applyAttack(s, r);
-        // during a surge the click's strike folds into the pot (design §3).
-        const captured = surge.recordStrike(r, baseDamage(s));
-        engineRef.current?.spawn(r.damage, r.tier, r.golden);
-        // outside a surge a manual hit erupts gold, so clicking feeds the collector
-        // like the auto-loop does — essence flows only through the drain, never here.
-        // the ballistic eruption arcs from the core to the click (target) and deposits
-        // molten gold that falls, cools, and settles into the collector band. a strike
-        // captured by the pot is instead paid out once on BANK, so erupting here too is
-        // suppressed to avoid double-crediting (de-dup, hkm.3) — keyed on the capture
-        // return, not surge.active, so the crit that busts the surge cannot leak out
-        // as world gold on top of burning with the pot (critstorm-cjs).
-        if (!captured) engineRef.current?.erupt(r.damage, r.tier, target);
-        audioRef.current.attack(Math.max(r.tier, 1));
-        if (r.golden) audioRef.current.golden();
+        runStrike(target);
     };
 
     /**
@@ -393,11 +405,21 @@ export function App() {
     const buyUpgrade = (id: UpgradeId) => {
         audioRef.current.unlock();
         if (!buy(stateRef.current, id)) return;
-        setHud(snapshot(stateRef.current));
+        setHud(snapshot(stateRef.current, autoStrikerRef.current));
         engineRef.current?.celebrate();
         audioRef.current.buy();
         setPulsing((p) => ({ ...p, [id]: true }));
         setTimeout(() => setPulsing((p) => ({ ...p, [id]: false })), 350);
+    };
+
+    /** purchase the fixed turret or shorten its strike interval by one level. */
+    const buyAutoStriker = (): void => {
+        audioRef.current.unlock();
+        if (!upgradeAutoStriker(stateRef.current, autoStrikerRef.current)) return;
+        engineRef.current?.setAutoStrikerOwned(true);
+        engineRef.current?.celebrate();
+        audioRef.current.buy();
+        setHud(snapshot(stateRef.current, autoStrikerRef.current));
     };
 
     const toggleMute = () => {
@@ -458,7 +480,7 @@ export function App() {
                 </div>
                 <div className="dps">
                     <span className="stat-val">{formatNumber(hud.dps)}</span>
-                    <span className="stat-key">dps expected</span>
+                    <span className="stat-key">turret dps expected</span>
                 </div>
                 <div className="statgrid">
                     <div className="chip">
@@ -468,10 +490,6 @@ export function App() {
                     <div className="chip">
                         <span className="chip-k">mult</span>
                         <span className="chip-v">×{hud.critMulti.toFixed(1)}</span>
-                    </div>
-                    <div className="chip">
-                        <span className="chip-k">rate</span>
-                        <span className="chip-v">{hud.attacksPerSec.toFixed(2)}/s</span>
                     </div>
                     {hud.goldenChance > 0 && (
                         <div className="chip gold">
@@ -604,6 +622,28 @@ export function App() {
                 </div>
                 <div className="brushes">
                     <div className="brushes-label">routing structures</div>
+                    <button
+                        className="brush"
+                        disabled={
+                            hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL ||
+                            !hud.autoStrikerAffordable
+                        }
+                        onClick={buyAutoStriker}
+                    >
+                        <span className="upgrade-name">
+                            Auto-Striker <em>lv{hud.autoStrikerLevel}</em>
+                        </span>
+                        <span className="upgrade-desc">
+                            {hud.autoStrikerLevel === 0
+                                ? "timer-fired strikes with independent aim"
+                                : `fires every ${hud.autoStrikerInterval.toFixed(1)}s`}
+                        </span>
+                        <span className="upgrade-cost">
+                            {hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL
+                                ? "max"
+                                : formatNumber(hud.autoStrikerCost)}
+                        </span>
+                    </button>
                     {STRUCTURES.map((structure) => (
                         <button
                             key={structure.id}
@@ -627,7 +667,7 @@ export function App() {
                         ? "click clear air to place · click the structure again to attack"
                         : selectedBrush
                           ? "drag on the storm to paint · click the brush again to attack"
-                        : "click anywhere to attack manually · catch falling 7 7 7"}
+                          : "click anywhere to attack manually · catch falling 7 7 7"}
                 </p>
             </aside>
         </div>

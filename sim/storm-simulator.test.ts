@@ -180,7 +180,7 @@ function emptyEconomy() {
         elapsed: 0,
         attackTimer: 0,
         frenzyTimer: 0,
-        levels: { baseDamage: 0, critChance: 0, critMulti: 0, attackRate: 0, golden: 0 },
+        levels: { baseDamage: 0, critChance: 0, critMulti: 0, golden: 0 },
     };
 }
 

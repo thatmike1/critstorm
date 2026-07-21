@@ -83,8 +83,8 @@ function runEconomyMode(minutes: number, seed: number): void {
     const rng = mulberry32(seed);
     const s = createState();
 
-    console.log("min | essence   | dps       | crit%  | multi | levels (chance/multi/rate)");
-    console.log("----|-----------|-----------|--------|-------|---------------------------");
+    console.log("min | essence   | dps       | crit%  | multi | levels (chance/multi/golden)");
+    console.log("----|-----------|-----------|--------|-------|-----------------------------");
 
     let nextLog = 0;
     for (let t = 0; t < minutes * 60; t += step) {
@@ -94,7 +94,7 @@ function runEconomyMode(minutes: number, seed: number): void {
         if (s.elapsed >= nextLog) {
             const l = s.levels;
             console.log(
-                `${String(Math.round(nextLog / 60)).padStart(3)} | ${formatNumber(s.essence).padStart(9)} | ${formatNumber(expectedDps(s)).padStart(9)} | ${(critChance(s) * 100).toFixed(1).padStart(5)}% | ${critMulti(s).toFixed(1).padStart(5)} | ${l.critChance}/${l.critMulti}/${l.attackRate}`
+                `${String(Math.round(nextLog / 60)).padStart(3)} | ${formatNumber(s.essence).padStart(9)} | ${formatNumber(expectedDps(s)).padStart(9)} | ${(critChance(s) * 100).toFixed(1).padStart(5)}% | ${critMulti(s).toFixed(1).padStart(5)} | ${l.critChance}/${l.critMulti}/${l.golden}`
             );
             nextLog += 60;
         }
@@ -109,14 +109,14 @@ function printStorm(summary: StormSummary): void {
         `storm  strategy=${summary.strategy}  seed=${summary.seed}  duration=${summary.durationSec}s`
     );
     console.log(
-        "min | cumEssence| cores | dps       | crit%  | multi | core°  | rank      | levels (c/m/r/g)"
+        "min | cumEssence| cores | dps       | crit%  | multi | core°  | rank      | levels (c/m/g)"
     );
     console.log(
         "----|-----------|-------|-----------|--------|-------|--------|-----------|------------------"
     );
     for (const s of summary.samples) {
         const l = s.levels;
-        const levels = `${l.critChance}/${l.critMulti}/${l.attackRate}/${l.golden}`;
+        const levels = `${l.critChance}/${l.critMulti}/${l.golden}`;
         console.log(
             `${String(s.minute).padStart(3)} | ${formatNumber(s.cumulativeEssence).padStart(9)} | ${String(s.cores).padStart(5)} | ${formatNumber(s.dps).padStart(9)} | ${s.critPct.toFixed(1).padStart(5)}% | ${s.multi.toFixed(1).padStart(5)} | ${s.coreTemp.toFixed(0).padStart(6)} | ${s.rank.padEnd(9)} | ${levels}`
         );

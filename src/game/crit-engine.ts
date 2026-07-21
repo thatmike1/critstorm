@@ -9,6 +9,7 @@ import type { PotState } from "./surge";
 import { tellsForLoad } from "./surge-tells";
 import { DrainMarker } from "./drain-marker";
 import type { CollectorRegion } from "./collector";
+import { AutoStrikerRenderer } from "./auto-striker";
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
 const TIER_COLORS = [
@@ -116,6 +117,7 @@ export class CritEngine {
     private stage: Container;
     private eruptLayer: Container;
     private drainMarker: DrainMarker;
+    private autoStriker: AutoStrikerRenderer;
     private coreGlow: Graphics;
     private glowPulse = 0;
     private glowPot: PotState | null = null;
@@ -148,6 +150,10 @@ export class CritEngine {
         // flash. on app.stage so screen shake never jitters it off the drain rect.
         this.drainMarker = new DrainMarker();
         app.stage.addChild(this.drainMarker.gfx);
+
+        // the purchased auto-striker is a pixel-native fixed structure beside the
+        // strike zone. its renderer owns only the marker and short muzzle tell.
+        this.autoStriker = new AutoStrikerRenderer(app.stage, this.world);
 
         // eruption projectiles ride above the world but below the crit numbers +
         // flash. it lives on app.stage (not this.stage) so screen shake never
@@ -206,6 +212,16 @@ export class CritEngine {
      */
     pulseDrain(): void {
         this.drainMarker.collected();
+    }
+
+    /** show the fixed auto-striker marker after purchase or dev-cheat migration. */
+    setAutoStrikerOwned(owned: boolean): void {
+        this.autoStriker.setOwned(owned);
+    }
+
+    /** flash the auto-striker muzzle when its timer fires. */
+    pulseAutoStriker(): void {
+        this.autoStriker.fire();
     }
 
     static async create(host: HTMLElement): Promise<CritEngine> {
@@ -612,6 +628,7 @@ export class CritEngine {
         // breathe + redraw the drain grate over the (resized) stage; the pulse decays
         // here so a collection flare fades even on frames the sim advanced no steps.
         this.drainMarker.update(dt, this.app.screen.width, this.app.screen.height);
+        this.autoStriker.update(dt, this.app.screen.width, this.app.screen.height);
         // breathe the surge core glow each frame so the pot reads as living molten
         // matter; only redraws while a pot is latched (design §3 render seam).
         if (this.glowPot) {
