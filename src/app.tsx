@@ -466,8 +466,12 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         audioRef.current.unlock();
         const pot = surge.endSurge("bank");
         if (pot.value > 0) {
-            engineRef.current?.eruptBank(pot.value);
-            audioRef.current.bank(pot.value);
+            // forge wiring (design §5): the banked pot leaves through the same
+            // eruption seam as un-captured strikes, so the eruption-value nodes
+            // fatten it too — surges are the dominant payout path.
+            const payout = pot.value * effects.eruptionValueMultiplier;
+            engineRef.current?.eruptBank(payout);
+            audioRef.current.bank(payout);
         }
     };
 
