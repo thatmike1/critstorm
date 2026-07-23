@@ -26,6 +26,7 @@ import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
 import { StormEvents, createStormEventRng } from "./game/storm-events";
+import { frontFromQuery, setSelectedFront } from "./game/fronts";
 import { STRUCTURES, canPlaceStructure, placeMagnet, type StructureId } from "./game/structures";
 import {
     AUTO_STRIKER_MAX_LEVEL,
@@ -63,6 +64,12 @@ import { WorkshopView } from "./workshop-view";
 // hydrated once at boot. storms are ephemeral, so nothing in-storm ever touches this.
 const profileStore = new ProfileStore();
 const initialWorkshop = loadWorkshopProfile(profileStore);
+
+// debug front selection for this wave (design §4.5): `?front=bog` picks the
+// bog before the first world is created; the workshop Front track and the
+// results flow wire real between-storms selection later.
+const debugFront = frontFromQuery(window.location.search);
+if (debugFront !== null) setSelectedFront(debugFront);
 
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;

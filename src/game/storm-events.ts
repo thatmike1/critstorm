@@ -1,4 +1,5 @@
 import { Mat } from "../sim/materials";
+import type { StormEventWeights } from "./fronts";
 import type { World } from "./world";
 
 /** a deterministic source of random values in the half-open range [0, 1). */
@@ -65,22 +66,47 @@ export function createStormEventRng(seed: number): StormEventRng {
 /** return the time between events at a given storm duration. */
 export function stormEventCadence(elapsed: number): number {
     const progress = clamp(elapsed / STORM_EVENT_ESCALATION_DURATION, 0, 1);
-    return INITIAL_STORM_EVENT_CADENCE +
-        (MIN_STORM_EVENT_CADENCE - INITIAL_STORM_EVENT_CADENCE) * progress;
+    return (
+        INITIAL_STORM_EVENT_CADENCE +
+        (MIN_STORM_EVENT_CADENCE - INITIAL_STORM_EVENT_CADENCE) * progress
+    );
 }
 
 /** return the severity tier at a given storm duration. */
 export function stormEventSeverity(elapsed: number): number {
-    return clamp(1 + Math.floor(Math.max(0, elapsed) / SEVERITY_INTERVAL), 1, MAX_STORM_EVENT_SEVERITY);
+    return clamp(
+        1 + Math.floor(Math.max(0, elapsed) / SEVERITY_INTERVAL),
+        1,
+        MAX_STORM_EVENT_SEVERITY
+    );
 }
 
-/** choose a storm event type with hazards favoured over the jackpot event. */
-function chooseStormEventType(rng: StormEventRng): StormEventType {
-    const roll = rng();
-    if (roll < 0.28) return "gold-rain";
-    if (roll < 0.68) return "acid-drizzle";
-    if (roll < 0.94) return "lava-fissure";
-    return "lightning-front";
+// fixed iteration order for the weighted pick, so a given rng roll always maps
+// to the same event regardless of the weight object's key order.
+const EVENT_TYPE_ORDER: readonly StormEventType[] = [
+    "gold-rain",
+    "acid-drizzle",
+    "lava-fissure",
+    "lightning-front",
+];
+
+/**
+ * choose a storm event type from a front's event-mix weights (design §4.5).
+ * weights are relative — they are normalised by their sum, so any positive
+ * scale works. one rng draw per call.
+ */
+export function chooseStormEventType(
+    rng: StormEventRng,
+    weights: StormEventWeights
+): StormEventType {
+    let total = 0;
+    for (const type of EVENT_TYPE_ORDER) total += weights[type];
+    let roll = rng() * total;
+    for (const type of EVENT_TYPE_ORDER) {
+        roll -= weights[type];
+        if (roll < 0) return type;
+    }
+    return EVENT_TYPE_ORDER[EVENT_TYPE_ORDER.length - 1];
 }
 
 /** return true when a cell is safe to overwrite with a new storm event particle. */
@@ -179,21 +205,27 @@ export class StormEvents {
         private readonly rng: StormEventRng
     ) {}
 
-    /** dispatch every event due at `elapsed`, returning them in scheduled order. */
+    /**
+     * dispatch every event due at `elapsed`, returning them in scheduled order.
+     * the world's front supplies the event mix and the risk multiplier: a front
+     * with riskMult > 1 shortens the interval between events by that factor
+     * (design §4.5 — risk x reward).
+     */
     tick(elapsed: number): StormEvent[] {
+        const { eventWeights, modifiers } = this.world.front;
         const events: StormEvent[] = [];
         while (elapsed >= this.nextEventAt) {
             const scheduledAt = this.nextEventAt;
             const event = triggerStormEvent(
                 this.world,
-                chooseStormEventType(this.rng),
+                chooseStormEventType(this.rng, eventWeights),
                 stormEventSeverity(scheduledAt),
                 this.rng
             );
             const timedEvent: StormEvent = { ...event, elapsed: scheduledAt };
             events.push(timedEvent);
             this.totalErupted += timedEvent.erupted;
-            this.nextEventAt += stormEventCadence(scheduledAt);
+            this.nextEventAt += stormEventCadence(scheduledAt) / modifiers.riskMult;
         }
         return events;
     }

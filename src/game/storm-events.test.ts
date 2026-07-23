@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Mat } from "../sim/materials";
+import { FRONTS } from "./fronts";
 import { createWorld } from "./world";
 import {
     INITIAL_STORM_EVENT_CADENCE,
@@ -79,7 +80,13 @@ describe("storm event simulation effects", () => {
     });
 
     it("routes acid-destroyed event gold into the loss ledger", () => {
-        const world = createWorld({ seed: 3, width: 40, height: 30, floorLevel: 0.8, variation: 0 });
+        const world = createWorld({
+            seed: 3,
+            width: 40,
+            height: 30,
+            floorLevel: 0.8,
+            variation: 0,
+        });
         let lost = 0;
         world.sim.setGoldLossListener((event) => {
             lost += event.amount;
@@ -108,7 +115,13 @@ describe("storm event simulation effects", () => {
     });
 
     it("routes lava-destroyed event gold into the loss ledger", () => {
-        const world = createWorld({ seed: 4, width: 40, height: 30, floorLevel: 0.8, variation: 0 });
+        const world = createWorld({
+            seed: 4,
+            width: 40,
+            height: 30,
+            floorLevel: 0.8,
+            variation: 0,
+        });
         let lost = 0;
         world.sim.setGoldLossListener((event) => {
             lost += event.amount;
@@ -129,5 +142,32 @@ describe("storm event simulation effects", () => {
         const event = triggerStormEvent(world, "lightning-front", 1, fixedRng);
         expect(event.cells).toEqual([]);
         expect(Array.from(world.sim.cells)).toEqual(before);
+    });
+});
+
+describe("storm events per front", () => {
+    it("dispatches more events on the bog: cadence is divided by riskMult", () => {
+        const flats = new StormEvents(
+            createWorld({ seed: 7, front: FRONTS.flats }),
+            createStormEventRng(9)
+        );
+        const bog = new StormEvents(
+            createWorld({ seed: 7, front: FRONTS.bog }),
+            createStormEventRng(9)
+        );
+        const flatsCount = flats.tick(10 * 60).length;
+        const bogCount = bog.tick(10 * 60).length;
+        expect(FRONTS.bog.modifiers.riskMult).toBeGreaterThan(1);
+        expect(bogCount).toBeGreaterThan(flatsCount);
+    });
+
+    it("keeps the flats schedule identical to a neutral riskMult", () => {
+        // flats riskMult is exactly 1, so its intervals are the raw cadence.
+        const events = new StormEvents(
+            createWorld({ seed: 3, front: FRONTS.flats }),
+            createStormEventRng(3)
+        ).tick(5 * 60);
+        expect(events[0].elapsed).toBe(INITIAL_STORM_EVENT_CADENCE);
+        expect(events[1].elapsed - events[0].elapsed).toBe(stormEventCadence(events[0].elapsed));
     });
 });

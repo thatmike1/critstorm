@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Mat } from "../sim/materials";
+import { FRONTS } from "./fronts";
 import { createWorld } from "./world";
 
 // world-bootstrap tests (design.md §2, §7): assert the generated terrain floor
@@ -144,6 +145,105 @@ describe("createWorld — strike zone", () => {
         expect(strikeZone.contains(x + 30, y + 30)).toBe(false); // dist ~42.4 > 40
     });
 });
+
+describe("createWorld — storm fronts (design §4.5)", () => {
+    it("defaults to the flats and carries the front on the world", () => {
+        expect(createWorld({ seed: 1 }).front.id).toBe("flats");
+        expect(createWorld({ seed: 1, front: FRONTS.bog }).front.id).toBe("bog");
+    });
+
+    it("keeps the flats free of oil and plant (no regression)", () => {
+        const { sim } = createWorld({ seed: 1, front: FRONTS.flats });
+        expect(countMat(sim, Mat.OIL)).toBe(0);
+        expect(countMat(sim, Mat.PLANT)).toBe(0);
+    });
+
+    it("builds the flats byte-identically with and without an explicit front", () => {
+        const implicit = createWorld({ seed: 42 });
+        const explicit = createWorld({ seed: 42, front: FRONTS.flats });
+        expect(Array.from(implicit.sim.cells)).toEqual(Array.from(explicit.sim.cells));
+    });
+
+    it("seeds oil pockets and plant patches into the bog", () => {
+        const { sim } = createWorld({ seed: 1, front: FRONTS.bog });
+        expect(countMat(sim, Mat.OIL)).toBeGreaterThan(0);
+        expect(countMat(sim, Mat.PLANT)).toBeGreaterThan(0);
+    });
+
+    it("keeps the bog's base floor identical to the flats' for the same seed", () => {
+        const flats = createWorld({ seed: 9, front: FRONTS.flats });
+        const bog = createWorld({ seed: 9, front: FRONTS.bog });
+        for (let x = 0; x < flats.sim.W; x++) {
+            expect(bog.floorHeightAt(x)).toBe(flats.floorHeightAt(x));
+        }
+    });
+
+    it("buries oil pockets fully enclosed: no oil cell touches air or sand", () => {
+        const { sim } = createWorld({ seed: 4, front: FRONTS.bog });
+        const { W, H, cells } = sim;
+        let oil = 0;
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                if (cells[y * W + x] !== Mat.OIL) continue;
+                oil++;
+                for (const [dx, dy] of [
+                    [0, -1],
+                    [0, 1],
+                    [-1, 0],
+                    [1, 0],
+                ]) {
+                    const nx = x + dx;
+                    const ny = y + dy;
+                    if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue; // grid edge is a wall
+                    const neighbour = cells[ny * W + nx];
+                    expect(neighbour === Mat.STONE || neighbour === Mat.OIL).toBe(true);
+                }
+            }
+        }
+        expect(oil).toBeGreaterThan(0);
+    });
+
+    it("grows plant patches on the surface, in what was open air", () => {
+        const flats = createWorld({ seed: 4, front: FRONTS.flats });
+        const bog = createWorld({ seed: 4, front: FRONTS.bog });
+        const { W, H, cells } = bog.sim;
+        let plants = 0;
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                if (cells[y * W + x] !== Mat.PLANT) continue;
+                plants++;
+                // plant sits above the floor surface, where the flats had air.
+                expect(y).toBeLessThan(bog.floorHeightAt(x));
+                expect(flats.sim.cells[y * W + x]).toBe(Mat.EMPTY);
+            }
+        }
+        expect(plants).toBeGreaterThan(0);
+    });
+
+    it("is deterministic per seed and differs across seeds", () => {
+        const a = createWorld({ seed: 11, front: FRONTS.bog });
+        const b = createWorld({ seed: 11, front: FRONTS.bog });
+        const c = createWorld({ seed: 12, front: FRONTS.bog });
+        expect(Array.from(a.sim.cells)).toEqual(Array.from(b.sim.cells));
+        expect(Array.from(a.sim.cells)).not.toEqual(Array.from(c.sim.cells));
+    });
+
+    it("stays stable after stepping: oil never leaks, plants never fall", () => {
+        const { sim } = createWorld({ seed: 2, front: FRONTS.bog });
+        const oilBefore = countMat(sim, Mat.OIL);
+        const plantBefore = countMat(sim, Mat.PLANT);
+        sim.step(30);
+        expect(countMat(sim, Mat.OIL)).toBe(oilBefore);
+        expect(countMat(sim, Mat.PLANT)).toBe(plantBefore);
+    });
+});
+
+/** count cells of one material across the whole grid. */
+function countMat(sim: ReturnType<typeof createWorld>["sim"], mat: number): number {
+    let n = 0;
+    for (let i = 0; i < sim.W * sim.H; i++) if (sim.cells[i] === mat) n++;
+    return n;
+}
 
 /** count solid terrain cells (sand + stone) across the whole grid. */
 function countSolid(sim: ReturnType<typeof createWorld>["sim"]): number {

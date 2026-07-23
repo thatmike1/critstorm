@@ -1,5 +1,7 @@
 import { Mat } from "../sim/materials";
 import { Simulation } from "../sim/simulation";
+import { getSelectedFront, type FrontDef } from "./fronts";
+import { seedOilPockets, seedPlantPatches } from "./terrain-seeding";
 
 // default grid size for a storm world (see design.md §7 — 320x180 upscaled).
 const DEFAULT_W = 320;
@@ -52,6 +54,8 @@ export interface WorldOptions {
     coreAboveFloor?: number;
     /** radius of the clickable strike zone in cells (default 44). */
     strikeRadius?: number;
+    /** the storm front to build (default: the currently selected front). */
+    front?: FrontDef;
 }
 
 /**
@@ -66,6 +70,8 @@ export interface World {
     readonly core: Vec2;
     /** clickable region around the core. */
     readonly strikeZone: StrikeZone;
+    /** the storm front this world was built for (design §4.5). */
+    readonly front: FrontDef;
     /** the y of the topmost solid cell for column `x` (the floor surface). */
     floorHeightAt(x: number): number;
 }
@@ -135,12 +141,13 @@ function paintFloor(sim: Simulation, surface: Int32Array, sandCap: number): void
 }
 
 /**
- * bootstrap a storm world for the "flats" front: a 320x180 sim with a generated
- * terrain floor, a storm core in the open air above it, and the strike zone
- * around the core. the terrain is fully deterministic given `opts.seed`.
+ * bootstrap a storm world: a 320x180 sim with a generated terrain floor, the
+ * front's terrain composition (oil pockets, plant patches — design §4.5), a
+ * storm core in the open air above the floor, and the strike zone around the
+ * core. the terrain is fully deterministic given `opts.seed` and the front.
  *
  * @param opts optional tuning; see {@link WorldOptions}.
- * @returns the sim plus the derived core and strike-zone geometry.
+ * @returns the sim plus the derived core, strike-zone geometry, and front.
  */
 export function createWorld(opts: WorldOptions = {}): World {
     const width = opts.width ?? DEFAULT_W;
@@ -157,6 +164,23 @@ export function createWorld(opts: WorldOptions = {}): World {
 
     const sim = new Simulation(width, height);
     paintFloor(sim, surface, sandCap);
+
+    // front terrain hooks run on their own rngs derived from the seed, so the
+    // base floor stays byte-identical across fronts for the same seed and the
+    // flats path is unchanged from the pre-front world.
+    const front = opts.front ?? getSelectedFront();
+    if (front.terrain.oilPockets) {
+        seedOilPockets(
+            sim,
+            surface,
+            sandCap,
+            front.terrain.oilPockets,
+            mulberry32(seed ^ 0x9e3779b9)
+        );
+    }
+    if (front.terrain.plantPatches) {
+        seedPlantPatches(sim, surface, front.terrain.plantPatches, mulberry32(seed ^ 0x3c6ef372));
+    }
 
     // core: horizontally centred, sitting `coreAboveFloor` cells above the floor
     // surface at its own column — guaranteed open air above the terrain. clamp
@@ -185,6 +209,7 @@ export function createWorld(opts: WorldOptions = {}): World {
         sim,
         core,
         strikeZone,
+        front,
         floorHeightAt(x: number): number {
             const cx = x < 0 ? 0 : x >= width ? width - 1 : x;
             return surface[cx];
