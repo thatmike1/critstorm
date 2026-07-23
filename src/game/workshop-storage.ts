@@ -4,6 +4,7 @@ import {
     type WorkshopState,
     type WorkshopTrackId,
 } from "./workshop";
+import type { ProfileStore } from "./persistence";
 
 // persistence for the workshop meta state (design §5: storm cores are PERMANENT).
 // the pure serialize/deserialize pair is what tests cover; the localStorage pair
@@ -66,4 +67,60 @@ export function saveWorkshop(state: WorkshopState): void {
     } catch {
         // persistence is best-effort: a blocked localStorage must never break play.
     }
+}
+
+/** encode purchased track counts as profile node ids, one `track:index` id per bought node. */
+export function encodePurchasedNodes(state: WorkshopState): string[] {
+    const ids: string[] = [];
+    for (const track of WORKSHOP_TRACKS) {
+        for (let i = 0; i < state.purchased[track.id]; i++) {
+            ids.push(`${track.id}:${i}`);
+        }
+    }
+    return ids;
+}
+
+/**
+ * apply profile node ids onto a workshop state's purchase counts, tolerating
+ * unknown tracks and clamping counts to each ladder's length.
+ */
+export function applyPurchasedNodes(state: WorkshopState, nodes: string[]): void {
+    for (const track of WORKSHOP_TRACKS) {
+        const prefix = `${track.id}:`;
+        const count = nodes.filter((id) => id.startsWith(prefix)).length;
+        state.purchased[track.id] = Math.min(count, track.nodes.length);
+    }
+}
+
+// the live workshop state the profile's cores/nodes sections read from and
+// hydrate into; the app republishes it via saveWorkshopProfile on every mutation.
+const holder = { state: createWorkshopState() };
+
+/**
+ * wire the workshop into the profile's `cores` and `nodes` sections, hydrate
+ * from storage, and return the loaded state. call once at boot before render.
+ */
+export function loadWorkshopProfile(store: ProfileStore): WorkshopState {
+    store.register(
+        "cores",
+        () => holder.state.cores,
+        (value) => {
+            holder.state.cores = value;
+        }
+    );
+    store.register(
+        "nodes",
+        () => encodePurchasedNodes(holder.state),
+        (value) => {
+            applyPurchasedNodes(holder.state, value);
+        }
+    );
+    store.load();
+    return holder.state;
+}
+
+/** publish the latest workshop state and persist the whole profile. */
+export function saveWorkshopProfile(store: ProfileStore, state: WorkshopState): void {
+    holder.state = state;
+    store.save();
 }

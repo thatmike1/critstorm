@@ -53,8 +53,14 @@ import {
     type WorkshopState,
     type WorkshopTrackId,
 } from "./game/workshop";
-import { loadWorkshop, saveWorkshop } from "./game/workshop-storage";
+import { loadWorkshopProfile, saveWorkshopProfile } from "./game/workshop-storage";
+import { ProfileStore } from "./game/persistence";
 import { WorkshopView } from "./workshop-view";
+
+// the persistent meta profile (design §7): storm cores + workshop nodes only,
+// hydrated once at boot. storms are ephemeral, so nothing in-storm ever touches this.
+const profileStore = new ProfileStore();
+const initialWorkshop = loadWorkshopProfile(profileStore);
 
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;
@@ -789,7 +795,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
  * consuming a snapshot of the workshop's aggregate effects.
  */
 export function App() {
-    const [workshop, setWorkshop] = useState<WorkshopState>(loadWorkshop);
+    const [workshop, setWorkshop] = useState<WorkshopState>(() => initialWorkshop);
     const [mode, setMode] = useState<"workshop" | "storm">("workshop");
     const [lastStorm, setLastStorm] = useState<StormEndAccounting | null>(null);
     const [stormSeq, setStormSeq] = useState(0);
@@ -799,7 +805,7 @@ export function App() {
         setWorkshop((prev) => {
             const next: WorkshopState = { cores: prev.cores, purchased: { ...prev.purchased } };
             if (!buyNode(next, track)) return prev;
-            saveWorkshop(next);
+            saveWorkshopProfile(profileStore, next);
             return next;
         });
     };
@@ -809,7 +815,7 @@ export function App() {
         setWorkshop((prev) => {
             const next: WorkshopState = { cores: prev.cores, purchased: { ...prev.purchased } };
             creditCores(next, accounting.cores);
-            saveWorkshop(next);
+            saveWorkshopProfile(profileStore, next);
             return next;
         });
         setLastStorm(accounting);
