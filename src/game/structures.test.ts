@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { Mat } from "../sim/materials";
 import { Simulation } from "../sim/simulation";
+import { AUTO_STRIKER_PURCHASE_COST } from "./auto-striker";
 import { createState } from "./economy";
-import { placeMagnet, structureById } from "./structures";
+import { placeMagnet, structureById, STRUCTURES } from "./structures";
+
+describe("structure catalogue", () => {
+    it("lists the auto-striker as a placed structure at its purchase price", () => {
+        expect(STRUCTURES.map((s) => s.id)).toContain("auto-striker");
+        expect(structureById("auto-striker").cost).toBe(AUTO_STRIKER_PURCHASE_COST);
+    });
+});
 
 describe("magnet structure placement", () => {
     it("deducts its one-time essence cost and paints a static marker", () => {

@@ -1,9 +1,10 @@
 import { Mat } from "../sim/materials";
 import type { Simulation } from "../sim/simulation";
+import { AUTO_STRIKER_PURCHASE_COST } from "./auto-striker";
 import type { EconomyState } from "./economy";
 
 /** structure identifiers available in the in-storm placement flow. */
-export type StructureId = "magnet";
+export type StructureId = "auto-striker" | "magnet";
 
 export interface StructureDef {
     id: StructureId;
@@ -27,6 +28,12 @@ export const MAGNET_RADIUS = 36;
 
 /** structure catalogue for one-click placement rather than brush painting. */
 export const STRUCTURES: StructureDef[] = [
+    {
+        id: "auto-striker",
+        name: "Auto-Striker",
+        desc: "timer-fired strikes with independent aim",
+        cost: AUTO_STRIKER_PURCHASE_COST,
+    },
     {
         id: "magnet",
         name: "Magnet",
@@ -52,7 +59,13 @@ function hasEmptyMarkerFootprint(sim: Simulation, x: number, y: number): boolean
     return MAGNET_MARKER.every((offset) => {
         const px = x + offset.x;
         const py = y + offset.y;
-        return px >= 0 && py >= 0 && px < sim.W && py < sim.H && sim.cells[py * sim.W + px] === Mat.EMPTY;
+        return (
+            px >= 0 &&
+            py >= 0 &&
+            px < sim.W &&
+            py < sim.H &&
+            sim.cells[py * sim.W + px] === Mat.EMPTY
+        );
     });
 }
 

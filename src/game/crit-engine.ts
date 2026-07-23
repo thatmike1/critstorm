@@ -214,9 +214,9 @@ export class CritEngine {
         this.drainMarker.collected();
     }
 
-    /** show the fixed auto-striker marker after purchase or dev-cheat migration. */
-    setAutoStrikerOwned(owned: boolean): void {
-        this.autoStriker.setOwned(owned);
+    /** show the auto-striker marker at its placed grid position, or hide it with null. */
+    setAutoStrikerPlacement(position: { x: number; y: number } | null): void {
+        this.autoStriker.setPlacement(position);
     }
 
     /** flash the auto-striker muzzle when its timer fires. */
@@ -261,40 +261,22 @@ export class CritEngine {
     }
 
     /**
-     * launch a gold eruption of `payout` toward `target` (screen px; the cursor for
-     * a manual strike). the sim has no velocity (design §7), so flight is a Pixi
-     * ballistic arc from the storm core to the impact cell, tier-widening the
-     * landing spread; on impact the payload converts to MOLTEN_GOLD grid cells that
-     * carry the payout through the value field (design §6 / §4.1). without a target
-     * it aims at a uniform-random point in the strike zone (auto-striker fire).
-     * `payout <= 0` is a no-op.
+     * launch a gold eruption of `payout` toward `target`, the FINAL impact point in
+     * grid cells. the sim has no velocity (design §7), so flight is a Pixi ballistic
+     * arc from the storm core to the impact cell; on impact the payload converts to
+     * MOLTEN_GOLD grid cells that carry the payout through the value field (design
+     * §6 / §4.1). the impact point — aim plus tier spread — is computed by game code
+     * on a seeded rng (src/game/auto-striker.ts), so this renderer never invents
+     * gameplay-affecting randomness; without a target it falls back to the strike
+     * zone centre deterministically. `payout <= 0` is a no-op.
      */
     erupt(payout: number, tier: number, target?: { x: number; y: number }): void {
         if (!(payout > 0)) return;
         const { W, H } = this.world.sim;
-        const sw = this.app.screen.width;
-        const sh = this.app.screen.height;
         const zone = this.world.strikeZone;
-
-        // resolve the aim point in grid coords: the cursor if given, else a
-        // uniform-random point inside the strike disc (sqrt keeps it area-uniform).
-        let gx: number;
-        let gy: number;
-        if (target) {
-            gx = (target.x / sw) * W;
-            gy = (target.y / sh) * H;
-        } else {
-            const a = Math.random() * Math.PI * 2;
-            const r = Math.sqrt(Math.random()) * zone.radius;
-            gx = zone.x + Math.cos(a) * r;
-            gy = zone.y + Math.sin(a) * r;
-        }
-        // tier-scaled spread: higher tiers spray gold wider around the aim point.
-        const spread = 1 + tier * 1.5;
-        gx += (Math.random() - 0.5) * 2 * spread;
-        gy += (Math.random() - 0.5) * 2 * spread;
-        const gxi = clampInt(Math.round(gx), 0, W - 1);
-        const gyi = clampInt(Math.round(gy), 0, H - 1);
+        const aim = target ?? { x: zone.x, y: zone.y };
+        const gxi = clampInt(Math.round(aim.x), 0, W - 1);
+        const gyi = clampInt(Math.round(aim.y), 0, H - 1);
         this.launchEruption(gxi, gyi, payout, tier);
     }
 

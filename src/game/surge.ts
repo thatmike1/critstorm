@@ -11,6 +11,13 @@ import type { AttackResult } from "./economy";
 /** heat meter value at which a surge ignites (design §3 — the existing 0..100 meter). */
 export const SURGE_HEAT_THRESHOLD = 100;
 
+/**
+ * pre-surge heat drain per second (design §3 — stop clicking and the meter drains).
+ * lives beside the threshold it races so game code and tests share one constant;
+ * the host applies it each frame via {@link Surge.decayHeat}, dt-scaled.
+ */
+export const HEAT_DECAY_PER_SEC = 16;
+
 /** per-crit growth factor of the pot multiplier: `M = 1.5^n` (design §3/§6). */
 export const POT_MULTIPLIER_STEP = 1.5;
 

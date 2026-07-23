@@ -20,26 +20,27 @@ import {
 import { markFirstSurge } from "./game/storm-end";
 import { formatNumber } from "./game/format";
 import { Collector, defaultCollectorRegion } from "./game/collector";
-import { Surge } from "./game/surge";
+import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
 import { StormEvents, createStormEventRng } from "./game/storm-events";
 import { STRUCTURES, canPlaceStructure, placeMagnet, type StructureId } from "./game/structures";
 import {
     AUTO_STRIKER_MAX_LEVEL,
+    autoStrikerAim,
     autoStrikerInterval,
+    autoStrikerStrikeHeat,
     autoStrikerUpgradeCost,
     canUpgradeAutoStriker,
     createAutoStrikerState,
+    defaultAutoStrikerPosition,
     executeStrike,
+    placeAutoStriker,
     tickAutoStriker,
     upgradeAutoStriker,
     type AutoStrikerState,
     type StrikeTarget,
 } from "./game/auto-striker";
-
-/** heat decay per second — stop clicking and the meter drains (pre-surge only) */
-const HEAT_DECAY = 16;
 
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;
@@ -175,8 +176,12 @@ export function App() {
     const captureSeqRef = useRef(0);
     const igniteUntilRef = useRef(0);
 
-    /** run manual and turret attacks through one heat, roll, capture, and eruption path. */
-    const runStrike = (target?: StrikeTarget): void => {
+    /**
+     * run manual and turret attacks through one heat, roll, capture, and eruption
+     * path. `target` is the aim point in grid cells; `heat` defaults to the manual
+     * per-click fill and turret fires pass their cadence-scaled heat instead.
+     */
+    const runStrike = (target?: StrikeTarget, heat?: number): void => {
         executeStrike(
             stateRef.current,
             surgeRef.current,
@@ -195,7 +200,8 @@ export function App() {
                     if (result.golden) audioRef.current.golden();
                 },
             },
-            target
+            target,
+            heat
         );
     };
 
@@ -213,7 +219,17 @@ export function App() {
             }
             engine = e;
             engineRef.current = e;
-            e.setAutoStrikerOwned(autoStrikerRef.current.level > 0);
+            // legacy ?lv dev-cheat migration: levels granted without a placement
+            // click get the historical fixed spot beside the strike zone.
+            const striker = autoStrikerRef.current;
+            if (striker.level > 0 && !striker.position) {
+                striker.position = defaultAutoStrikerPosition(
+                    e.storm.strikeZone,
+                    e.simulation.W,
+                    e.simulation.H
+                );
+            }
+            e.setAutoStrikerPlacement(striker.position);
             // storm events replace the old falling-777 bonus with deterministic
             // in-world pressure (design §4.4). its rng is isolated from combat rolls
             // so the same storm duration always schedules the same world events.
@@ -233,7 +249,12 @@ export function App() {
                 s.elapsed += dt;
                 tickAutoStriker(autoStrikerRef.current, dt, () => {
                     engine!.pulseAutoStriker();
-                    runStrike();
+                    // aim + heat are game-code decisions: an area-uniform strike-zone
+                    // point (seedable rng seam) and the cadence-scaled heat fill.
+                    runStrike(
+                        autoStrikerAim(engine!.storm.strikeZone, Math.random),
+                        autoStrikerStrikeHeat(autoStrikerRef.current)
+                    );
                 });
                 const drained = collector.collect(e.simulation);
                 creditEssence(s, drained);
@@ -241,7 +262,7 @@ export function App() {
                 // visibly originates FROM the drain rather than appearing on the HUD.
                 if (drained > 0) engine!.pulseDrain();
                 // heat drains only pre-surge; during a surge the machine ignores it.
-                surge.decayHeat(HEAT_DECAY * dt);
+                surge.decayHeat(HEAT_DECAY_PER_SEC * dt);
                 // drive the surge core-heat model (design §3, hkm.2): the ambient ramp
                 // climbs with surge time and the per-crit spikes land inside
                 // recordStrike above; when the core crosses critical temp the machine
@@ -335,6 +356,17 @@ export function App() {
             audioRef.current.buy();
             setHud(snapshot(stateRef.current, autoStrikerRef.current));
         }
+        if (
+            structureId === "auto-striker" &&
+            placeAutoStriker(sim, stateRef.current, autoStrikerRef.current, gx, gy)
+        ) {
+            engine.setAutoStrikerPlacement(autoStrikerRef.current.position);
+            engine.celebrate();
+            audioRef.current.buy();
+            // the turret is singular: leave placement mode once it stands.
+            setSelectedStructure(null);
+            setHud(snapshot(stateRef.current, autoStrikerRef.current));
+        }
     };
 
     const onStagePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -364,9 +396,17 @@ export function App() {
     const manualAttack = (e: ReactPointerEvent<HTMLDivElement>) => {
         audioRef.current.unlock();
         clickTimesRef.current.push(performance.now());
-        // aim the eruption at the click position, in host-local canvas pixels.
+        // aim the eruption at the click position, mapped to grid cells — the
+        // coordinate space every strike target uses (see StrikeTarget).
         const rect = hostRef.current?.getBoundingClientRect();
-        const target = rect ? { x: e.clientX - rect.left, y: e.clientY - rect.top } : undefined;
+        const sim = engineRef.current?.simulation;
+        const target =
+            rect && sim && rect.width > 0 && rect.height > 0
+                ? {
+                      x: ((e.clientX - rect.left) / rect.width) * sim.W,
+                      y: ((e.clientY - rect.top) / rect.height) * sim.H,
+                  }
+                : undefined;
         runStrike(target);
     };
 
@@ -412,11 +452,11 @@ export function App() {
         setTimeout(() => setPulsing((p) => ({ ...p, [id]: false })), 350);
     };
 
-    /** purchase the fixed turret or shorten its strike interval by one level. */
-    const buyAutoStriker = (): void => {
+    /** shorten the placed turret's strike interval by one level (placement buys it). */
+    const buyAutoStrikerUpgrade = (): void => {
         audioRef.current.unlock();
+        if (autoStrikerRef.current.level === 0) return;
         if (!upgradeAutoStriker(stateRef.current, autoStrikerRef.current)) return;
-        engineRef.current?.setAutoStrikerOwned(true);
         engineRef.current?.celebrate();
         audioRef.current.buy();
         setHud(snapshot(stateRef.current, autoStrikerRef.current));
@@ -622,29 +662,31 @@ export function App() {
                 </div>
                 <div className="brushes">
                     <div className="brushes-label">routing structures</div>
-                    <button
-                        className="brush"
-                        disabled={
-                            hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL ||
-                            !hud.autoStrikerAffordable
-                        }
-                        onClick={buyAutoStriker}
-                    >
-                        <span className="upgrade-name">
-                            Auto-Striker <em>lv{hud.autoStrikerLevel}</em>
-                        </span>
-                        <span className="upgrade-desc">
-                            {hud.autoStrikerLevel === 0
-                                ? "timer-fired strikes with independent aim"
-                                : `fires every ${hud.autoStrikerInterval.toFixed(1)}s`}
-                        </span>
-                        <span className="upgrade-cost">
-                            {hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL
-                                ? "max"
-                                : formatNumber(hud.autoStrikerCost)}
-                        </span>
-                    </button>
-                    {STRUCTURES.map((structure) => (
+                    {hud.autoStrikerLevel > 0 && (
+                        <button
+                            className="brush"
+                            disabled={
+                                hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL ||
+                                !hud.autoStrikerAffordable
+                            }
+                            onClick={buyAutoStrikerUpgrade}
+                        >
+                            <span className="upgrade-name">
+                                Auto-Striker <em>lv{hud.autoStrikerLevel}</em>
+                            </span>
+                            <span className="upgrade-desc">
+                                fires every {hud.autoStrikerInterval.toFixed(1)}s
+                            </span>
+                            <span className="upgrade-cost">
+                                {hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL
+                                    ? "max"
+                                    : formatNumber(hud.autoStrikerCost)}
+                            </span>
+                        </button>
+                    )}
+                    {STRUCTURES.filter(
+                        (structure) => structure.id !== "auto-striker" || hud.autoStrikerLevel === 0
+                    ).map((structure) => (
                         <button
                             key={structure.id}
                             className={
