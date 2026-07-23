@@ -17,7 +17,7 @@ import {
     type RankInfo,
     type UpgradeId,
 } from "./game/economy";
-import { markFirstSurge } from "./game/storm-end";
+import { endStorm, markFirstSurge, type StormEndAccounting } from "./game/storm-end";
 import { formatNumber } from "./game/format";
 import { Collector, defaultCollectorRegion } from "./game/collector";
 import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
@@ -41,6 +41,20 @@ import {
     type AutoStrikerState,
     type StrikeTarget,
 } from "./game/auto-striker";
+import {
+    ambientCoeffWith,
+    applyStormStart,
+    buyNode,
+    creditCores,
+    collectorFeeWith,
+    criticalTempWith,
+    workshopEffects,
+    type WorkshopEffects,
+    type WorkshopState,
+    type WorkshopTrackId,
+} from "./game/workshop";
+import { loadWorkshop, saveWorkshop } from "./game/workshop-storage";
+import { WorkshopView } from "./workshop-view";
 
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;
@@ -95,9 +109,10 @@ function snapshot(s: EconomyState, autoStriker: AutoStrikerState): HudState {
 
 /**
  * migrate the legacy ?lv=base,chance,multi,rate,golden cheat by mapping its removed
- * rate slot onto the auto-striker level while preserving the remaining upgrades.
+ * rate slot onto the auto-striker level while preserving the remaining upgrades,
+ * then apply the workshop's storm-start grants (Forge levels, Vault essence) on top.
  */
-function createInitialState(): InitialGameState {
+function createInitialState(effects: WorkshopEffects): InitialGameState {
     const economy = createState();
     let autoStriker = createAutoStrikerState();
     const lv = new URLSearchParams(window.location.search).get("lv");
@@ -113,11 +128,20 @@ function createInitialState(): InitialGameState {
         };
         autoStriker = createAutoStrikerState(legacyRate);
     }
+    applyStormStart(economy, effects);
     return { economy, autoStriker };
 }
 
-export function App() {
-    const [initialState] = useState(createInitialState);
+/** props for one storm run; a fresh mount consumes a fresh workshop-effects snapshot. */
+interface StormViewProps {
+    /** the aggregate workshop effects this storm opens with (design §5). */
+    effects: WorkshopEffects;
+    /** fired when the player banks out of the storm, with its core accounting. */
+    onStormEnd(accounting: StormEndAccounting): void;
+}
+
+function StormView({ effects, onStormEnd }: StormViewProps) {
+    const [initialState] = useState(() => createInitialState(effects));
     const hostRef = useRef<HTMLDivElement>(null);
     const stateRef = useRef<EconomyState>(initialState.economy);
     const autoStrikerRef = useRef<AutoStrikerState>(initialState.autoStriker);
@@ -128,15 +152,23 @@ export function App() {
     // the swelling pot, and the exit seam. lives in a ref so its state survives
     // re-renders; the HUD mirrors it through `heat` + `surgeHud` each frame.
     const surgeRef = useRef(
-        new Surge({
-            // the overheat bust (design §3, hkm.4): the machine ends itself when the
-            // core crosses critical (hkm.2), so the lava payload hangs off the exit
-            // seam, covering every machine-initiated exit. BANK stays at its own call
-            // site (bankSurge) because only the player triggers it.
-            onEnd: (reason, pot) => {
-                if (reason === "bust") engineRef.current?.bust(pot);
+        new Surge(
+            {
+                // the overheat bust (design §3, hkm.4): the machine ends itself when the
+                // core crosses critical (hkm.2), so the lava payload hangs off the exit
+                // seam, covering every machine-initiated exit. BANK stays at its own call
+                // site (bankSurge) because only the player triggers it.
+                onEnd: (reason, pot) => {
+                    if (reason === "bust") engineRef.current?.bust(pot);
+                },
             },
-        })
+            // aegis wiring (design §5): the workshop raises the core's critical temp
+            // and dampens the ambient ramp, so deep rides become survivable.
+            {
+                criticalTemp: criticalTempWith(effects),
+                ambientCoeff: ambientCoeffWith(effects),
+            }
+        )
     );
     const stormEventsRef = useRef<StormEvents | null>(null);
     const [hud, setHud] = useState<HudState>(() =>
@@ -194,7 +226,13 @@ export function App() {
                 onStrike: (result, captured, strikeTarget) => {
                     engineRef.current?.spawn(result.damage, result.tier, result.golden);
                     if (!captured) {
-                        engineRef.current?.erupt(result.damage, result.tier, strikeTarget);
+                        // forge wiring (design §5): eruption-value nodes fatten the
+                        // gold a strike erupts into the world, at the source seam.
+                        engineRef.current?.erupt(
+                            result.damage * effects.eruptionValueMultiplier,
+                            result.tier,
+                            strikeTarget
+                        );
                     }
                     audioRef.current.attack(Math.max(result.tier, 1));
                     if (result.golden) audioRef.current.golden();
@@ -237,7 +275,12 @@ export function App() {
             // the drain: solid gold settling in this band becomes essence at
             // (1 - fee). essence now flows ONLY through here (applyAttack no longer
             // credits it), so an attack pays out only once its gold reaches home.
-            const collector = new Collector(defaultCollectorRegion(e.storm));
+            // vault wiring (design §5): the workshop drives the skim fee down from
+            // its 30% base, so more of each arriving gold cell mints as essence.
+            const collector = new Collector(
+                defaultCollectorRegion(e.storm),
+                collectorFeeWith(effects)
+            );
             // show the drain on screen (design pillar 4): the marker grate marks the
             // catchment so gold reaching it reads as banked, not silently vanished.
             e.setDrainRegion(collector.region);
@@ -426,6 +469,20 @@ export function App() {
             engineRef.current?.eruptBank(pot.value);
             audioRef.current.bank(pot.value);
         }
+    };
+
+    /**
+     * bank OUT of the whole storm (design §5): the voluntary storm exit that
+     * converts this storm's collected essence into permanent cores at ×1.5. any
+     * live surge is closed through its bank seam first (the run is over, so its
+     * pot is not erupted — there is nobody left to collect it), then the storm's
+     * accounting is handed to the meta layer, which routes back to the workshop.
+     */
+    const bankOut = () => {
+        audioRef.current.unlock();
+        const surge = surgeRef.current;
+        if (surge.active) surge.endSurge("bank");
+        onStormEnd(endStorm(stateRef.current, "bank-out"));
     };
 
     // spacebar banks a live surge (design §3). preventDefault stops the space from
@@ -711,7 +768,67 @@ export function App() {
                           ? "drag on the storm to paint · click the brush again to attack"
                           : "click anywhere to attack manually · catch falling 7 7 7"}
                 </p>
+                <button className="bank-out" onClick={bankOut}>
+                    <span className="bank-out-word">BANK OUT</span>
+                    <span className="bank-out-hint">end storm · ×1.5 cores</span>
+                </button>
             </aside>
         </div>
+    );
+}
+
+/**
+ * root router (design §5): the game alternates between a storm run and the
+ * full-screen between-storms workshop. the workshop owns the permanent meta
+ * state (cores + purchased nodes, persisted to localStorage); each storm mounts
+ * a fresh {@link StormView} keyed by run number so its refs and sim state reset,
+ * consuming a snapshot of the workshop's aggregate effects.
+ */
+export function App() {
+    const [workshop, setWorkshop] = useState<WorkshopState>(loadWorkshop);
+    const [mode, setMode] = useState<"workshop" | "storm">("workshop");
+    const [lastStorm, setLastStorm] = useState<StormEndAccounting | null>(null);
+    const [stormSeq, setStormSeq] = useState(0);
+
+    /** buy the next node on a track, persisting on success. */
+    const buyTrackNode = (track: WorkshopTrackId): void => {
+        setWorkshop((prev) => {
+            const next: WorkshopState = { cores: prev.cores, purchased: { ...prev.purchased } };
+            if (!buyNode(next, track)) return prev;
+            saveWorkshop(next);
+            return next;
+        });
+    };
+
+    /** credit a finished storm's cores and return to the workshop. */
+    const handleStormEnd = (accounting: StormEndAccounting): void => {
+        setWorkshop((prev) => {
+            const next: WorkshopState = { cores: prev.cores, purchased: { ...prev.purchased } };
+            creditCores(next, accounting.cores);
+            saveWorkshop(next);
+            return next;
+        });
+        setLastStorm(accounting);
+        setMode("workshop");
+    };
+
+    /** start the next storm run with the current workshop effects. */
+    const enterStorm = (): void => {
+        setStormSeq((n) => n + 1);
+        setMode("storm");
+    };
+
+    if (mode === "workshop") {
+        return (
+            <WorkshopView
+                workshop={workshop}
+                lastStorm={lastStorm}
+                onBuyNode={buyTrackNode}
+                onEnterStorm={enterStorm}
+            />
+        );
+    }
+    return (
+        <StormView key={stormSeq} effects={workshopEffects(workshop)} onStormEnd={handleStormEnd} />
     );
 }

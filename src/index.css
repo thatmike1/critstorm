@@ -931,3 +931,346 @@ button:disabled .upgrade-cost {
   .hud::after { opacity: 0.7; }
   .stage.frenzy::after { opacity: 1; }
 }
+
+/* ─── bank out (leave the storm, design §5) ──────────────────────────── */
+
+/* deliberately quiet next to BANK: leaving the storm is a considered exit,
+   not the moment-to-moment action, so it reads as cabinet trim, not a jackpot. */
+.bank-out {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--gold-shadow);
+  background: linear-gradient(180deg, #1c1509, #0f0a05);
+  color: var(--gold);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.1), 0 2px 0 #050302;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.bank-out:hover {
+  border-color: var(--gold);
+  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.18), 0 0 12px rgba(244, 207, 90, 0.3);
+}
+
+.bank-out:active {
+  transform: translateY(1px);
+}
+
+.bank-out-hint {
+  font-family: var(--font-num);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--ink-dim);
+}
+
+/* ─── the workshop (between storms, design §5) ───────────────────────── */
+
+/* full-screen cabinet back-room: same locked dark casino skin, four track
+   ladders side by side under the gold trim. */
+.workshop {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 26px clamp(18px, 4vw, 56px) 22px;
+  overflow: hidden;
+  background:
+    radial-gradient(90% 60% at 50% -10%, rgba(244, 207, 90, 0.08), transparent 60%),
+    linear-gradient(180deg, var(--cabinet-raised), var(--cabinet) 55%);
+}
+
+.workshop-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.workshop-head h1 {
+  font-family: var(--font-display);
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold-hi);
+  text-shadow:
+    0 0 1px #fff,
+    0 0 6px rgba(255, 224, 130, 0.9),
+    0 0 14px rgba(244, 207, 90, 0.7),
+    0 2px 0 #7a5514;
+}
+
+.workshop-sub {
+  font-family: var(--font-num);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+}
+
+/* the storm that just ended: its yield stamped like a payout receipt */
+.storm-yield {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--gold-shadow);
+  background: linear-gradient(180deg, rgba(244, 207, 90, 0.1), rgba(244, 207, 90, 0.03));
+  width: fit-content;
+}
+
+.yield-reason {
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 1.5px;
+  color: var(--gold-hi);
+}
+
+.yield-detail {
+  font-family: var(--font-num);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+/* the wallet: the big number of the room */
+.core-wallet {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.wallet-value {
+  font-family: var(--font-num);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-size: 34px;
+  color: var(--gold);
+  text-shadow: 0 0 14px rgba(244, 207, 90, 0.55), 0 2px 0 #593f0d;
+}
+
+.wallet-label {
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* four ladders side by side; each column scrolls its own nodes */
+.tracks {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.track {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid #4a3a1c;
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 242, 194, 0.05), transparent 30%),
+    linear-gradient(180deg, #17110a, #0d0a05);
+  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.1), 0 3px 8px rgba(0, 0, 0, 0.6);
+}
+
+.track-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'name count' 'desc desc';
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 11px 12px 9px;
+  border-bottom: 1px solid var(--gold-shadow);
+}
+
+.track-head h2 {
+  grid-area: name;
+  font-family: var(--font-display);
+  font-size: 16px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.track-desc {
+  grid-area: desc;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--ink-faint);
+}
+
+.track-count {
+  grid-area: count;
+  font-family: var(--font-num);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.track-nodes {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+}
+
+/* one ladder rung; shares the shop-row grid so the workshop reads as the same
+   machine as the in-storm shop */
+.node {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'pip name cost' 'pip desc cost';
+  column-gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid #3a2e18;
+  text-align: left;
+  font-family: var(--font-cabinet);
+}
+
+.node-pip {
+  grid-area: pip;
+  font-size: 11px;
+  color: var(--gold);
+}
+
+.node-name {
+  grid-area: name;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--ink);
+  letter-spacing: 0.3px;
+}
+
+.node-desc {
+  grid-area: desc;
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+
+.node-cost {
+  grid-area: cost;
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+/* purchased rungs sit lit but settled — bought, banked, part of the machine */
+.node.owned {
+  background: linear-gradient(180deg, rgba(244, 207, 90, 0.09), rgba(244, 207, 90, 0.03));
+  border-color: var(--gold-shadow);
+}
+
+.node.owned .node-cost {
+  color: var(--ink-faint);
+}
+
+/* the next rung is the ONE actionable purchase per track */
+.node.next {
+  cursor: pointer;
+  border: 1px solid var(--gold);
+  background:
+    linear-gradient(180deg, rgba(255, 242, 194, 0.08), transparent 40%),
+    linear-gradient(180deg, #241c10, #130d06);
+  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.14), 0 2px 0 #050302;
+  transition: transform 0.08s, box-shadow 0.15s, filter 0.15s;
+}
+
+.node.next .node-cost {
+  color: #2a1d05;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--grad-gold);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.node.next:hover:not(:disabled) {
+  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.2), 0 0 14px rgba(244, 207, 90, 0.35);
+}
+
+.node.next:active:not(:disabled) {
+  transform: translateY(2px);
+}
+
+.node.next:disabled {
+  cursor: default;
+  filter: grayscale(0.6) brightness(0.62);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+
+/* locked preview rungs: visible so the ladder has a future, but clearly inert */
+.node.locked {
+  opacity: 0.45;
+}
+
+.node.locked .node-pip {
+  color: var(--ink-faint);
+}
+
+.track-complete {
+  padding: 8px;
+  text-align: center;
+  font-family: var(--font-num);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+/* the one exit: back into the storm, styled like the BANK jackpot key */
+.enter-storm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 2px solid var(--gold-hi);
+  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
+  color: #1a0a00;
+  font-family: var(--font-display);
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(244, 207, 90, 0.6);
+  animation: bank-pulse 1.4s ease-in-out infinite alternate;
+}
+
+.enter-word {
+  font-size: 17px;
+  letter-spacing: 3px;
+}
+
+.enter-hint {
+  font-family: var(--font-cabinet);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  opacity: 0.75;
+}
+
+.enter-storm:hover {
+  filter: brightness(1.1);
+}
+
+.enter-storm:active {
+  transform: translateY(1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter-storm {
+    animation: none !important;
+  }
+}
