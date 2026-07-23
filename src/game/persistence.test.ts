@@ -83,6 +83,25 @@ describe("round-trip", () => {
         expect(rawProfile().cores).toBe(1);
     });
 
+    it("hydrates a section registered after load instead of letting save wipe it", () => {
+        localStorage.setItem(
+            PROFILE_KEY,
+            JSON.stringify({ v: PROFILE_VERSION, cores: 0, nodes: ["aegis", "magnet-2"] })
+        );
+        const store = new ProfileStore();
+        store.load();
+        // the workshop module wires in late — after load has already run
+        const purchased: string[] = [];
+        store.register(
+            "nodes",
+            () => [...purchased],
+            (value) => purchased.splice(0, purchased.length, ...value)
+        );
+        expect(purchased).toEqual(["aegis", "magnet-2"]);
+        store.save();
+        expect(rawProfile().nodes).toEqual(["aegis", "magnet-2"]);
+    });
+
     it("preserves an unregistered section across a save from another domain", () => {
         localStorage.setItem(
             PROFILE_KEY,

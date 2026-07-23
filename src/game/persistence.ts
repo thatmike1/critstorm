@@ -81,14 +81,18 @@ export class ProfileStore {
     private readonly sections: Sections = {};
     /** last known profile, used to carry unregistered sections through a save. */
     private current: ProfileV1 = freshProfile();
+    /** whether {@link load} has run; late registrations hydrate immediately from it. */
+    private loaded = false;
 
     constructor(storage: Storage | null = defaultStorage()) {
         this.storage = storage;
     }
 
     /**
-     * plug a domain into a profile section. call before {@link load} so the
-     * domain gets hydrated; the store never imports the domain itself.
+     * plug a domain into a profile section; the store never imports the domain
+     * itself. registering after {@link load} hydrates the domain immediately
+     * from the already-loaded profile, so a late registration can never let a
+     * subsequent {@link save} overwrite the stored section with fresh state.
      */
     register<K extends SectionKey>(
         key: K,
@@ -99,6 +103,7 @@ export class ProfileStore {
         // mapped type; the pair is built from the same K as the key, so it cannot
         // mis-pair a section with another key's value type.
         this.sections[key] = { serialize, hydrate } as Sections[K];
+        if (this.loaded) hydrate(this.current[key]);
     }
 
     /**
@@ -107,6 +112,7 @@ export class ProfileStore {
      */
     load(): ProfileV1 {
         this.current = this.read();
+        this.loaded = true;
         for (const key of SECTION_KEYS) {
             this.hydrateSection(key);
         }
@@ -162,7 +168,7 @@ export function createCoresWallet(): CoresWallet {
     return { cores: 0 };
 }
 
-/** wire a wallet into the store's `cores` section. call before {@link ProfileStore.load}. */
+/** wire a wallet into the store's `cores` section, before or after {@link ProfileStore.load}. */
 export function connectCoresWallet(store: ProfileStore, wallet: CoresWallet): void {
     store.register(
         "cores",
