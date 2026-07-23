@@ -17,7 +17,9 @@ import {
     type RankInfo,
     type UpgradeId,
 } from "./game/economy";
-import { endStorm, markFirstSurge, type StormEndAccounting } from "./game/storm-end";
+import { markFirstSurge, type StormEndAccounting, type StormEndReason } from "./game/storm-end";
+import { bustTriggersBlowUp, StormLifecycle, type StormSummary } from "./game/storm-lifecycle";
+import { ResultsScreen } from "./results-screen";
 import { formatNumber } from "./game/format";
 import { Collector, defaultCollectorRegion } from "./game/collector";
 import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
@@ -154,18 +156,27 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     const engineRef = useRef<CritEngine | null>(null);
     const audioRef = useRef<AudioEngine>(new AudioEngine());
     const clickTimesRef = useRef<number[]>([]);
-    // the surge state machine replaces frenzy (design §3): it owns the heat meter,
-    // the swelling pot, and the exit seam. lives in a ref so its state survives
-    // re-renders; the HUD mirrors it through `heat` + `surgeHud` each frame.
-    const surgeRef = useRef(
+    /**
+     * build a fresh surge machine for one storm. the overheat bust (design §3,
+     * hkm.4): the machine ends itself when the core crosses critical (hkm.2), so
+     * the lava payload hangs off the exit seam, covering every machine-initiated
+     * exit. BANK stays at its own call site (bankSurge) because only the player
+     * triggers it. a bust can also escalate into the whole storm ending (npq.2).
+     */
+    const makeSurge = () =>
         new Surge(
             {
-                // the overheat bust (design §3, hkm.4): the machine ends itself when the
-                // core crosses critical (hkm.2), so the lava payload hangs off the exit
-                // seam, covering every machine-initiated exit. BANK stays at its own call
-                // site (bankSurge) because only the player triggers it.
                 onEnd: (reason, pot) => {
-                    if (reason === "bust") engineRef.current?.bust(pot);
+                    if (reason !== "bust") return;
+                    engineRef.current?.bust(pot);
+                    // INTERIM blow-up condition (npq.2): an overheat bust while the world
+                    // still holds more unbanked gold than the threshold ends the WHOLE
+                    // storm, not just the surge — busting while overexposed loses it.
+                    // totalValue is read after the bust, so the burned pot (already on
+                    // the loss ledger) is excluded. npq.1's storm events are the real
+                    // escalation and will replace or absorb this check.
+                    const sim = engineRef.current?.simulation;
+                    if (sim && bustTriggersBlowUp(sim.totalValue())) endStormNow("blow-up");
                 },
             },
             // aegis wiring (design §5): the workshop raises the core's critical temp
@@ -174,9 +185,18 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 criticalTemp: criticalTempWith(effects),
                 ambientCoeff: ambientCoeffWith(effects),
             }
-        )
-    );
+        );
+    // the surge state machine replaces frenzy (design §3): it owns the heat meter,
+    // the swelling pot, and the exit seam. lives in a ref so its state survives
+    // re-renders; the HUD mirrors it through `heat` + `surgeHud` each frame.
+    const surgeRef = useRef(makeSurge());
+    // per-storm stats + the sim gold-loss subscription (npq.2); owned by this
+    // mount, so a dead storm's numbers can never bleed into the next run.
+    const lifecycleRef = useRef(new StormLifecycle());
     const stormEventsRef = useRef<StormEvents | null>(null);
+    // non-null once the storm has ended: the results screen replaces the stage and
+    // the storm effect's cleanup tears the dead world down (npq.2).
+    const [summary, setSummary] = useState<StormSummary | null>(null);
     const [hud, setHud] = useState<HudState>(() =>
         snapshot(stateRef.current, autoStrikerRef.current)
     );
@@ -227,6 +247,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             {
                 onSurgeStart: () => {
                     markFirstSurge(stateRef.current);
+                    lifecycleRef.current.recordSurgeStart();
                     audioRef.current.frenzy();
                 },
                 onStrike: (result, captured, strikeTarget) => {
@@ -250,6 +271,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     };
 
     useEffect(() => {
+        // between storms the results screen owns the view: the stage host is not
+        // mounted and the previous run's cleanup already tore the dead world down.
+        if (summary) return;
         let engine: CritEngine | null = null;
         let raf = 0;
         let last = performance.now();
@@ -263,6 +287,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             }
             engine = e;
             engineRef.current = e;
+            // subscribe this storm's stat tracker to the sim's gold-loss ledger so
+            // the results screen can report gold lost to hazards (npq.2).
+            lifecycleRef.current.attach(e.simulation);
             // legacy ?lv dev-cheat migration: levels granted without a placement
             // click get the historical fixed spot beside the strike zone.
             const striker = autoStrikerRef.current;
@@ -365,11 +392,14 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         return () => {
             cancelled = true;
             cancelAnimationFrame(raf);
+            lifecycleRef.current.detach();
             stormEventsRef.current = null;
             engine?.destroy();
             engineRef.current = null;
         };
-    }, []);
+        // the effect is keyed by the storm: ending one (summary set) tears the
+        // world down, and NEXT STORM (stormSeq bump) builds a fresh one.
+    }, [summary]);
 
     /**
      * paint the active brush at a screen position (design §4.2). maps host-local
@@ -482,24 +512,49 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     };
 
     /**
-     * bank OUT of the whole storm (design §5): the voluntary storm exit that
-     * converts this storm's collected essence into permanent cores at ×1.5. any
-     * live surge is closed through its bank seam first (the run is over, so its
-     * pot is not erupted — there is nobody left to collect it), then the storm's
-     * accounting is handed to the meta layer, which routes back to the workshop.
+     * end the storm (npq.2): summarize it exactly once and route to the results
+     * screen. the `cur ??` guard makes a second ending in the same storm (e.g. the
+     * dev trigger racing a bust) a no-op; the storm effect's cleanup tears the dead
+     * world down when the stage unmounts.
      */
-    const bankOut = () => {
+    const endStormNow = (reason: StormEndReason): void => {
+        const final = lifecycleRef.current.summarize(stateRef.current, reason);
+        setSummary((cur) => cur ?? final);
+    };
+
+    /**
+     * BANK OUT (design §2/§5): the voluntary storm ending — keep everything and
+     * take the ×1.5 core bonus. allowed only BETWEEN surges: mid-surge the only
+     * exit is the in-surge BANK/bust pair, so ending the storm can never dodge a
+     * live pot's risk.
+     */
+    const bankOutStorm = (): void => {
+        if (surgeRef.current.active) return;
         audioRef.current.unlock();
-        const surge = surgeRef.current;
-        if (surge.active) surge.endSurge("bank");
-        onStormEnd(endStorm(stateRef.current, "bank-out"));
+        endStormNow("bank-out");
+    };
+
+    /**
+     * leave the results screen: hand the storm's accounting to the meta layer,
+     * which credits cores and routes to the workshop. the next run remounts a
+     * fresh StormView keyed by run number, so nothing from this storm survives.
+     */
+    const finishStorm = (): void => {
+        if (summary) onStormEnd(summary);
     };
 
     // spacebar banks a live surge (design §3). preventDefault stops the space from
     // scrolling or re-triggering a focused button; the guard inside bankSurge makes
-    // it harmless pre-surge. refs keep the handler stable across renders.
+    // it harmless pre-surge. F9 is the explicit dev trigger for a storm blow-up
+    // (npq.2) until npq.1's escalation events can end a storm on their own. refs
+    // keep the handlers stable across renders.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
+            if (e.code === "F9") {
+                e.preventDefault();
+                endStormNow("blow-up");
+                return;
+            }
             if (e.code !== "Space") return;
             e.preventDefault();
             bankSurge();
@@ -556,6 +611,13 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     // a brush is "buyable" while at least one cell of it is affordable — the same
     // essence gate paintBrush enforces per cell (design §4.2).
     const affordBrush = (b: BrushDef): boolean => canPaint(stateRef.current, b);
+
+    // storm over: the results screen replaces the whole cabinet until NEXT STORM
+    // (design §5 — the moment that teaches quitting while ahead is smart). the
+    // stage host unmounting is what lets the storm effect's cleanup free the world.
+    if (summary) {
+        return <ResultsScreen summary={summary} onNextStorm={finishStorm} />;
+    }
 
     return (
         <div className="layout">
@@ -671,18 +733,23 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                         </button>
                     </div>
                 ) : (
-                    <div className="heat">
-                        <div className="heat-label">
-                            <span>{cps.toFixed(1)} clicks/s</span>
-                            <span className="heat-hint">click fast → surge</span>
+                    <>
+                        <div className="heat">
+                            <div className="heat-label">
+                                <span>{cps.toFixed(1)} clicks/s</span>
+                                <span className="heat-hint">click fast → surge</span>
+                            </div>
+                            <div className="heat-bar">
+                                <div
+                                    className="heat-fill"
+                                    style={{ transform: `scaleX(${(heat / 100).toFixed(3)})` }}
+                                />
+                            </div>
                         </div>
-                        <div className="heat-bar">
-                            <div
-                                className="heat-fill"
-                                style={{ transform: `scaleX(${(heat / 100).toFixed(3)})` }}
-                            />
-                        </div>
-                    </div>
+                        <button className="bank-out-btn" onClick={bankOutStorm}>
+                            BANK OUT <em>end storm · keep all · ×1.5 cores</em>
+                        </button>
+                    </>
                 )}
                 <div className="rank">
                     <div className="rank-label">
@@ -778,10 +845,6 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                           ? "drag on the storm to paint · click the brush again to attack"
                           : "click anywhere to attack manually · catch falling 7 7 7"}
                 </p>
-                <button className="bank-out" onClick={bankOut}>
-                    <span className="bank-out-word">BANK OUT</span>
-                    <span className="bank-out-hint">end storm · ×1.5 cores</span>
-                </button>
             </aside>
         </div>
     );
