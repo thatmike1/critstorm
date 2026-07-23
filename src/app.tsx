@@ -26,7 +26,7 @@ import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
 import { StormEvents, createStormEventRng } from "./game/storm-events";
-import { frontFromQuery, setSelectedFront } from "./game/fronts";
+import { applyPayoutModifier, frontFromQuery, setSelectedFront } from "./game/fronts";
 import { STRUCTURES, canPlaceStructure, placeMagnet, type StructureId } from "./game/structures";
 import {
     AUTO_STRIKER_MAX_LEVEL,
@@ -339,7 +339,11 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                         autoStrikerStrikeHeat(autoStrikerRef.current)
                     );
                 });
-                const drained = collector.collect(e.simulation);
+                // the front's reward knob applies at the mint (design §4.5): the bog's
+                // payoutMult scales essence as gold converts, mirroring the riskMult the
+                // event scheduler already consumes. post-sim, so the in-world value
+                // ledger stays conserved.
+                const drained = applyPayoutModifier(e.storm.front, collector.collect(e.simulation));
                 creditEssence(s, drained);
                 // pulse the drain grate the frame it converts gold, so essence income
                 // visibly originates FROM the drain rather than appearing on the HUD.
