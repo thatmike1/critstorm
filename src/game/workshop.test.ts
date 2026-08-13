@@ -62,6 +62,25 @@ describe("workshop node tables (design §5)", () => {
             }
         }
     });
+
+    it("keeps the Front unlocks at their saved ladder indices", () => {
+        const front = trackById("front");
+        expect(front.nodes[2]).toMatchObject({
+            name: "The Bog",
+            desc: "unlock storm front 2",
+            effect: { kind: "unlock-front", front: 2 },
+        });
+        expect(front.nodes[6]).toMatchObject({
+            name: "The Eye",
+            desc: "unlock storm front 3",
+            effect: { kind: "unlock-front", front: 3 },
+        });
+        expect(front.nodes[10]).toMatchObject({
+            name: "The Glacier",
+            desc: "unlock storm front 4",
+            effect: { kind: "unlock-front", front: 4 },
+        });
+    });
 });
 
 describe("workshop purchases", () => {

@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
     FRONTS,
     applyPayoutModifier,
+    availableFronts,
     frontFromQuery,
     getSelectedFront,
+    resolveFrontSelection,
     setSelectedFront,
 } from "./fronts";
 import { chooseStormEventType, createStormEventRng } from "./storm-events";
+import { frontPickerOptions } from "../workshop-view";
 
 // front-definition tests (design §4.5): the flats and the bog exist as data,
 // the payout/risk knobs apply as plain multipliers, the selection seam works,
@@ -16,6 +19,8 @@ describe("front definitions", () => {
     it("ships the flats and the bog", () => {
         expect(FRONTS.flats.id).toBe("flats");
         expect(FRONTS.bog.id).toBe("bog");
+        expect(FRONTS.flats.ordinal).toBe(1);
+        expect(FRONTS.bog.ordinal).toBe(2);
     });
 
     it("gives the flats open ground: no terrain hooks, neutral modifiers", () => {
@@ -38,6 +43,42 @@ describe("front definitions", () => {
         expect(FRONTS.bog.eventWeights["gold-rain"]).toBeGreaterThan(
             FRONTS.flats.eventWeights["gold-rain"]
         );
+    });
+});
+
+describe("availableFronts", () => {
+    it("returns only implemented fronts at or below the unlocked ordinal", () => {
+        expect(availableFronts(1).map((front) => front.id)).toEqual(["flats"]);
+        expect(availableFronts(2).map((front) => front.id)).toEqual(["flats", "bog"]);
+        expect(availableFronts(4).map((front) => front.id)).toEqual(["flats", "bog"]);
+    });
+});
+
+describe("resolveFrontSelection", () => {
+    it("falls back to flats for missing, invalid, and locked selections", () => {
+        expect(resolveFrontSelection(null, 2).id).toBe("flats");
+        expect(resolveFrontSelection(undefined, 2).id).toBe("flats");
+        expect(resolveFrontSelection("bog", 1).id).toBe("flats");
+        expect(resolveFrontSelection("bog", 0).id).toBe("flats");
+    });
+
+    it("keeps an unlocked Bog selection", () => {
+        expect(resolveFrontSelection("bog", 2).id).toBe("bog");
+        expect(resolveFrontSelection("bog", 4).id).toBe("bog");
+    });
+});
+
+describe("front picker model", () => {
+    it("keeps a locked Bog visible but not selectable", () => {
+        const options = frontPickerOptions(1, "flats");
+        expect(options.map((option) => option.front.id)).toEqual(["flats", "bog"]);
+        expect(options[0]).toMatchObject({ locked: false, selected: true });
+        expect(options[1]).toMatchObject({ locked: true, selected: false });
+    });
+
+    it("marks an unlocked selection as current", () => {
+        const options = frontPickerOptions(2, "bog");
+        expect(options[1]).toMatchObject({ locked: false, selected: true });
     });
 });
 

@@ -26,7 +26,13 @@ import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
 import { StormEvents, createStormEventRng } from "./game/storm-events";
-import { applyPayoutModifier, frontFromQuery, setSelectedFront } from "./game/fronts";
+import {
+    applyPayoutModifier,
+    frontFromQuery,
+    resolveFrontSelection,
+    setSelectedFront,
+    type FrontId,
+} from "./game/fronts";
 import { STRUCTURES, canPlaceStructure, placeMagnet, type StructureId } from "./game/structures";
 import {
     AUTO_STRIKER_MAX_LEVEL,
@@ -66,11 +72,9 @@ import { WorkshopView } from "./workshop-view";
 const profileStore = new ProfileStore();
 const initialWorkshop = loadWorkshopProfile(profileStore);
 
-// debug front selection for this wave (design §4.5): `?front=bog` picks the
-// bog before the first world is created; the workshop Front track and the
-// results flow wire real between-storms selection later.
+// debug front selection for QA (design §4.5): `?front=bog` remains an explicit
+// bypass for testing the Bog before its Front node is purchased.
 const debugFront = frontFromQuery(window.location.search);
-if (debugFront !== null) setSelectedFront(debugFront);
 
 /** rolling window for the clicks-per-second readout */
 const CPS_WINDOW = 2;
@@ -881,6 +885,9 @@ export function App() {
     const [mode, setMode] = useState<"workshop" | "storm">("workshop");
     const [lastStorm, setLastStorm] = useState<StormEndAccounting | null>(null);
     const [stormSeq, setStormSeq] = useState(0);
+    // front selection is session-only: a reload starts at Flats, while a return
+    // from Results keeps the choice in this App state.
+    const [selectedFront, setSelectedFrontId] = useState<FrontId>(() => debugFront ?? "flats");
 
     /** buy the next node on a track, persisting on success. */
     const buyTrackNode = (track: WorkshopTrackId): void => {
@@ -906,6 +913,11 @@ export function App() {
 
     /** start the next storm run with the current workshop effects. */
     const enterStorm = (): void => {
+        const unlockedFronts = workshopEffects(workshop).unlockedFronts;
+        const resolvedFront =
+            debugFront ?? resolveFrontSelection(selectedFront, unlockedFronts).id;
+        setSelectedFront(resolvedFront);
+        setSelectedFrontId(resolvedFront);
         setStormSeq((n) => n + 1);
         setMode("storm");
     };
@@ -916,6 +928,8 @@ export function App() {
                 workshop={workshop}
                 lastStorm={lastStorm}
                 onBuyNode={buyTrackNode}
+                selectedFront={selectedFront}
+                onSelectFront={setSelectedFrontId}
                 onEnterStorm={enterStorm}
             />
         );

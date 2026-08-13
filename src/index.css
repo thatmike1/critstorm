@@ -1216,6 +1216,86 @@ button:disabled .upgrade-cost {
   gap: 10px;
 }
 
+/* session-only arena picker: the locked Bog remains visible so the Front ladder
+   has a clear destination without pretending higher fronts are implemented. */
+.front-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid #4a3a1c;
+  background: linear-gradient(180deg, rgba(244, 207, 90, 0.06), rgba(0, 0, 0, 0.12));
+}
+
+.front-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.front-picker-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.front-picker-head p,
+.front-picker-current,
+.front-option-detail {
+  margin: 3px 0 0;
+  font-family: var(--font-num);
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+
+.front-picker-current {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.front-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.front-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--gold-shadow);
+  background: rgba(255, 242, 194, 0.05);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.front-option.selected {
+  border-color: var(--gold);
+  background: rgba(244, 207, 90, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(244, 207, 90, 0.15);
+}
+
+.front-option.locked {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.front-option:not(:disabled):hover {
+  filter: brightness(1.15);
+}
+
+.front-option-name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .wallet-value {
   font-family: var(--font-num);
   font-weight: 800;

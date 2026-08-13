@@ -314,7 +314,7 @@ const FRONT_NODES: readonly WorkshopNodeDef[] = [
         desc: "surge crits count as tier 2 or higher",
         effect: { kind: "surge-tier-floor", floor: 2 },
     },
-    { name: "The Dunes", desc: "unlock storm front 2", effect: { kind: "unlock-front", front: 2 } },
+    { name: "The Bog", desc: "unlock storm front 2", effect: { kind: "unlock-front", front: 2 } },
     {
         name: "Neutral Rain",
         desc: "acid drizzle lands ×0.8 lighter",
@@ -337,7 +337,7 @@ const FRONT_NODES: readonly WorkshopNodeDef[] = [
         effect: { kind: "surge-tier-floor", floor: 3 },
     },
     {
-        name: "The Glacier",
+        name: "The Eye",
         desc: "unlock storm front 3",
         effect: { kind: "unlock-front", front: 3 },
     },
@@ -363,7 +363,7 @@ const FRONT_NODES: readonly WorkshopNodeDef[] = [
         effect: { kind: "surge-tier-floor", floor: 4 },
     },
     {
-        name: "The Caldera",
+        name: "The Glacier",
         desc: "unlock storm front 4",
         effect: { kind: "unlock-front", front: 4 },
     },
@@ -518,9 +518,8 @@ export interface WorkshopEffects {
     ambientHeatMultiplier: number;
     /** Aegis: degrees added to the surge core critical temperature. */
     criticalTempBonus: number;
-    /** Front: highest storm front unlocked (1 = the base flats front). CONSUMED
-     * LATER — only the flats front exists today (design §4.5); front selection is
-     * future wiring. */
+    /** Front: highest front ordinal unlocked (1 = Flats, 2 = Bog). The session
+     * picker exposes implemented fronts; higher ordinals are consumed as fronts land. */
     unlockedFronts: number;
     /** Front: permanent storm event modifiers. CONSUMED LATER — the scheduler
      * takes no modifiers until npq.1 wires them in. */
