@@ -1,4 +1,10 @@
-import { buy, createState, creditEssence, valueToEssence } from "../src/game/economy";
+import {
+    buy,
+    COLLECTOR_BASE_FEE,
+    createState,
+    creditEssence,
+    valueToEssence,
+} from "../src/game/economy";
 import {
     brushById,
     fullStrokeCost,
@@ -14,6 +20,13 @@ import { mulberry32, withSeededRandom } from "./rng";
 
 /** fixed timestep used by the reference pacing profile. */
 export const PACING_STEP_SEC = 0.05;
+
+/**
+ * conservative core-to-drain delay for competent flats routing. real 320x180
+ * world parity tests collect core-centred eruptions completely within 62 frames
+ * (3.1s at 20Hz); queued value remains physically pending until this delay elapses.
+ */
+export const PACING_COLLECTION_DELAY_SEC = 3.1;
 
 /** fresh-player click and purchase behavior measured by the §8 pacing gate. */
 export interface StormBotProfile {
@@ -64,9 +77,22 @@ export interface StormBotSummary {
     brushCellsPainted: number;
     brushEssenceSpent: number;
     brushBankedEssenceDelta: number;
+    /** raw value generated outside surges and queued toward the collector. */
     routedValue: number;
     bankedPotValue: number;
     bustedPotValue: number;
+    /** raw generated value across world routes, banked pots, and busted pots. */
+    generatedValue: number;
+    /** raw value still pending in the bounded collection queue at the time limit. */
+    pendingValue: number;
+    /** value held in a still-live surge pot at the time limit. */
+    livePotValue: number;
+    /** raw value that reached the collector before its fee. */
+    rawCollectedValue: number;
+    /** raw value destroyed before collection; currently surge-busted pots. */
+    lostValue: number;
+    /** collector skim withheld from raw collected value. */
+    collectorFeeValue: number;
     finalEssence: number;
     cumulativeEssence: number;
     reachedFirstSurge: boolean;
@@ -145,17 +171,42 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
     let bankedPotValue = 0;
     let bustedPotValue = 0;
     let brushPending = false;
+    let rawCollectedValue = 0;
+    let collectorFeeValue = 0;
+    let lostValue = 0;
+    const collectionQueue: Array<{ value: number; collectAtSec: number }> = [];
+
+    /** place generated gold into the bounded physical-routing delay. */
+    const queueCollection = (value: number): void => {
+        if (!(value > 0)) return;
+        collectionQueue.push({
+            value,
+            collectAtSec: economy.elapsed + PACING_COLLECTION_DELAY_SEC,
+        });
+    };
+
+    /** collect every queued payout whose deterministic routing delay has elapsed. */
+    const collectDue = (timeSec: number): void => {
+        while (collectionQueue[0] && collectionQueue[0].collectAtSec <= timeSec + 1e-9) {
+            const route = collectionQueue.shift()!;
+            rawCollectedValue += route.value;
+            const credited = valueToEssence(route.value, COLLECTOR_BASE_FEE);
+            collectorFeeValue += route.value - credited;
+            creditEssence(economy, credited);
+        }
+    };
 
     /** route a completed surge exactly once: banked pots collect, busted pots are lost. */
     const settlePot = (reason: "bank" | "bust", pot: PotState): void => {
         if (reason === "bank") {
             banks += 1;
             bankedPotValue += pot.value;
-            creditEssence(economy, valueToEssence(pot.value));
+            queueCollection(pot.value);
             return;
         }
         busts += 1;
         bustedPotValue += pot.value;
+        lostValue += pot.value;
     };
 
     const surge = new Surge(
@@ -169,17 +220,8 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
         { rng: surgeRng }
     );
 
-    /** advance both heat clocks to an exact scheduled time. */
-    const advanceTo = (timeSec: number): void => {
-        const dt = timeSec - economy.elapsed;
-        if (!(dt > 0)) return;
-        economy.elapsed = timeSec;
-        surge.decayHeat(HEAT_DECAY_PER_SEC * dt);
-        surge.tickHeat(dt);
-    };
-
-    /** reserve the first full stroke before the greedy economy spends its balance. */
-    const reserveBrushOrBuy = (): void => {
+    /** reserve the first full stroke as soon as collected essence covers it. */
+    const reserveBrush = (): void => {
         if (
             profile.paintFirstStoneStroke &&
             firstBrushPaintedAtSec === null &&
@@ -188,11 +230,25 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
             if (firstBrushAffordableAtSec === null) firstBrushAffordableAtSec = economy.elapsed;
             brushPending = true;
         }
+    };
 
+    /** buy at most one dps upgrade after a pointer action when no brush is reserved. */
+    const buyDpsUpgrade = (): void => {
         if (!brushPending && profile.buyDpsUpgrades) {
             const upgrade = greedyBuy(economy);
             if (upgrade) buy(economy, upgrade);
         }
+    };
+
+    /** advance heat and collection clocks to an exact scheduled time. */
+    const advanceTo = (timeSec: number): void => {
+        const dt = timeSec - economy.elapsed;
+        if (!(dt > 0)) return;
+        economy.elapsed = timeSec;
+        surge.decayHeat(HEAT_DECAY_PER_SEC * dt);
+        surge.tickHeat(dt);
+        collectDue(timeSec);
+        reserveBrush();
     };
 
     const frames = Math.ceil(config.durationSec / stepSec);
@@ -212,7 +268,7 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
                 firstBrushPaintedAtSec = economy.elapsed;
                 brushActions += 1;
                 brushPending = false;
-                reserveBrushOrBuy();
+                buyDpsUpgrade();
                 continue;
             }
 
@@ -227,17 +283,22 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
                     }
                     routedAttacks += 1;
                     routedValue += result.damage;
-                    creditEssence(economy, valueToEssence(result.damage));
+                    queueCollection(result.damage);
                 },
             });
             const action = strategy.decide(strategyView(economy.elapsed, economy, surge));
             if (action.type === "bank" && surge.active) surge.endSurge("bank");
-            reserveBrushOrBuy();
+            reserveBrush();
+            buyDpsUpgrade();
         }
         advanceTo(frameEnd);
     }
 
     const stormEnd = endStorm(economy, "blow-up");
+    const livePotValue = surge.active ? surge.pot.value : 0;
+    const pendingValue =
+        collectionQueue.reduce((total, route) => total + route.value, 0) + livePotValue;
+    const generatedValue = routedValue + bankedPotValue + bustedPotValue + livePotValue;
     return {
         profile: profile.name,
         strategy: strategy.name,
@@ -262,6 +323,12 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
         routedValue,
         bankedPotValue,
         bustedPotValue,
+        generatedValue,
+        pendingValue,
+        livePotValue,
+        rawCollectedValue,
+        lostValue,
+        collectorFeeValue,
         finalEssence: economy.essence,
         cumulativeEssence: economy.bankedEssence,
         reachedFirstSurge: economy.reachedFirstSurge,

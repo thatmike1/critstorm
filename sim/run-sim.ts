@@ -97,6 +97,12 @@ function printPacing(summary: StormBotSummary): void {
         `stone stroke    : ${summary.brushCellsPainted} cells / ${summary.brushEssenceSpent} essence`
     );
     console.log(`cum essence    : ${formatNumber(summary.cumulativeEssence)}`);
+    console.log(
+        `value ledger    : ${formatNumber(summary.generatedValue)} generated = ${formatNumber(summary.pendingValue)} pending + ${formatNumber(summary.rawCollectedValue)} collected + ${formatNumber(summary.lostValue)} lost`
+    );
+    console.log(
+        `collector       : ${formatNumber(summary.cumulativeEssence)} essence + ${formatNumber(summary.collectorFeeValue)} fee`
+    );
     console.log(`blow-up cores  : ${summary.blowUpCores}`);
 }
 

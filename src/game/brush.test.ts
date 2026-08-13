@@ -41,6 +41,11 @@ describe("brush catalogue", () => {
         expect(fullStrokeCellCount(stone)).toBe(29);
         expect(fullStrokeCost(stone)).toBe(174);
     });
+
+    it("keeps stronger water strictly more expensive than cheap stone", () => {
+        expect(water.costPerCell).toBe(7);
+        expect(water.costPerCell).toBeGreaterThan(stone.costPerCell);
+    });
 });
 
 describe("paintBrush per-cell cost deduction", () => {

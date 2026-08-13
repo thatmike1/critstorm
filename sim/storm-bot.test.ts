@@ -1,13 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { valueToEssence } from "../src/game/economy";
-import { FRESH_PACING_PROFILE, runStormBot, type StormBotSummary } from "./storm-bot";
+import { COLLECTOR_BASE_FEE, valueToEssence } from "../src/game/economy";
+import { Collector, defaultCollectorRegion } from "../src/game/collector";
+import { depositEruption } from "../src/game/eruption";
+import { createWorld } from "../src/game/world";
+import {
+    FRESH_PACING_PROFILE,
+    PACING_COLLECTION_DELAY_SEC,
+    PACING_STEP_SEC,
+    runStormBot,
+    type StormBotSummary,
+} from "./storm-bot";
+import { withSeededRandom } from "./rng";
 
 /** select a stable nearest-rank quantile from sorted deterministic trials. */
 function quantile(summaries: StormBotSummary[], key: keyof StormBotSummary, p: number): number {
-    const values = summaries
-        .map((summary) => summary[key])
-        .filter((value): value is number => typeof value === "number")
-        .sort((a, b) => a - b);
+    const raw = summaries.map((summary) => summary[key]);
+    if (raw.some((value) => typeof value !== "number")) {
+        throw new Error(`${String(key)} was not reached in every pacing trial`);
+    }
+    const values = (raw as number[]).sort((a, b) => a - b);
     return values[Math.floor((values.length - 1) * p)];
 }
 
@@ -39,6 +50,36 @@ describe("fresh storm pacing bot", () => {
         expect(quantile(summaries, "firstBrushAffordableAtSec", 0.5)).toBeLessThanOrEqual(105);
         expect(quantile(summaries, "firstBrushAffordableAtSec", 0.9)).toBeLessThanOrEqual(120);
         expect(quantile(summaries, "firstBrushPaintedAtSec", 0.9)).toBeLessThanOrEqual(120);
+    });
+
+    it("fails a timing distribution when any trial does not reach the gate", () => {
+        const incomplete = [runStormBot({ durationSec: 1, seed: 1 })];
+        expect(() => quantile(incomplete, "firstSurgeAtSec", 0.5)).toThrow(/not reached/);
+        expect(() => quantile(incomplete, "firstBrushAffordableAtSec", 0.5)).toThrow(/not reached/);
+    });
+
+    it("bounds delayed collection by the real core-to-drain physical path", () => {
+        const frames = Math.round(PACING_COLLECTION_DELAY_SEC / PACING_STEP_SEC);
+        expect(frames).toBe(62);
+        for (const seed of [3, 7, 42]) {
+            const result = withSeededRandom(seed, () => {
+                const world = createWorld({ seed });
+                const collector = new Collector(defaultCollectorRegion(world));
+                const payout = 1000;
+                depositEruption(world.sim, world.core.x, world.core.y, payout);
+                let essence = 0;
+                for (let frame = 0; frame < frames; frame++) {
+                    world.sim.step();
+                    essence += collector.collect(world.sim);
+                }
+                return { essence, pending: world.sim.totalValue(), payout };
+            });
+            expect(result.essence).toBeCloseTo(
+                valueToEssence(result.payout, COLLECTOR_BASE_FEE),
+                4
+            );
+            expect(result.pending).toBeCloseTo(0, 4);
+        }
     });
 
     it("paints exactly one 29-cell stone stroke without reducing banked essence", () => {
@@ -91,15 +132,33 @@ describe("fresh storm pacing bot", () => {
         ).toThrow(/manualClicksPerSec/);
     });
 
-    it("routes every strike exactly once and never collects a busted pot", () => {
+    it("conserves generated value through pending, collection, fees, and loss", () => {
         const summary = runStormBot({ durationSec: 180, seed: 1000 });
         expect(summary.capturedAttacks).toBeGreaterThan(0);
         expect(summary.bustedPotValue).toBeGreaterThan(0);
         expect(summary.attacks).toBe(summary.routedAttacks + summary.capturedAttacks);
-        expect(summary.cumulativeEssence).toBeCloseTo(
-            valueToEssence(summary.routedValue + summary.bankedPotValue),
+        expect(summary.generatedValue).toBeCloseTo(
+            summary.pendingValue + summary.rawCollectedValue + summary.lostValue,
             8
         );
+        expect(summary.lostValue).toBe(summary.bustedPotValue);
+        expect(summary.cumulativeEssence + summary.collectorFeeValue).toBeCloseTo(
+            summary.rawCollectedValue,
+            8
+        );
+        expect(summary.cumulativeEssence).toBeCloseTo(
+            valueToEssence(summary.rawCollectedValue, COLLECTOR_BASE_FEE),
+            8
+        );
+    });
+
+    it("keeps the conservation ledger closed across the full reference sweep", () => {
+        for (const summary of referenceSweep()) {
+            expect(summary.generatedValue).toBeCloseTo(
+                summary.pendingValue + summary.rawCollectedValue + summary.lostValue,
+                8
+            );
+        }
     });
 
     it("marks actual first-surge ignition for storm-end core accounting", () => {

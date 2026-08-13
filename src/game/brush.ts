@@ -24,7 +24,8 @@ export interface BrushDef {
  * in the same affordability regime as the crit upgrades (design §6 cost band),
  * rebased so a first stone stroke — a 29-cell disc at 6 essence each — is a
  * deliberate purchase reachable around the ~90 s first-surge gate (design §8),
- * not an instant freebie. water quenches molten gold and costs more per cell.
+ * not an instant freebie. water stays strictly more expensive because its stronger
+ * quench is the next defense tier; only stone's §8 affordability is tuned here.
  */
 export const BRUSHES: BrushDef[] = [
     {
@@ -40,7 +41,7 @@ export const BRUSHES: BrushDef[] = [
         name: "Water",
         desc: "quenches molten gold fast",
         mat: Mat.WATER,
-        costPerCell: 3,
+        costPerCell: 7,
         radius: 3,
     },
 ];
