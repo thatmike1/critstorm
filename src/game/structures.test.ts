@@ -9,6 +9,8 @@ import {
     placeSprinkler,
     SPRINKLER_INTERVAL_SEC,
     SPRINKLER_OFFSETS,
+    SINGULAR_MARKER_OFFSETS,
+    isStructureInstalled,
     tickSprinkler,
     structureById,
     STRUCTURES,
@@ -56,14 +58,38 @@ describe("sprinkler structure", () => {
 });
 
 describe("lightning rod structure", () => {
-    it("is singular and uses an empty-air metal marker", () => {
+    it("is singular and uses a distinct empty-air metal marker", () => {
         const sim = new Simulation(30, 20);
         const state = createState();
         state.essence = 2000;
         expect(placeLightningRod(sim, state, 15, 10)).toEqual({ x: 15, y: 10 });
         expect(placeLightningRod(sim, state, 20, 10)).toBeNull();
         expect(state.essence).toBe(1000);
-        expect(sim.cells[10 * sim.W + 15]).toBe(Mat.METAL);
+        for (const offset of SINGULAR_MARKER_OFFSETS["lightning-rod"]) {
+            expect(sim.cells[(10 + offset.y) * sim.W + 15 + offset.x]).toBe(Mat.METAL);
+        }
+        expect(SINGULAR_MARKER_OFFSETS.sprinkler).not.toEqual(
+            SINGULAR_MARKER_OFFSETS["lightning-rod"]
+        );
+    });
+
+    it("rejects a value-carrying marker footprint without charging", () => {
+        const sim = new Simulation(30, 20);
+        const state = createState();
+        state.essence = 1000;
+        sim.addValue(15, 8, 50);
+        expect(placeLightningRod(sim, state, 15, 10)).toBeNull();
+        expect(state.essence).toBe(1000);
+        expect(sim.getValue(15, 8)).toBe(50);
+    });
+});
+
+describe("structure installation state", () => {
+    it("marks singular structure buttons as installed", () => {
+        const installed = { sprinkler: true, "lightning-rod": false } as const;
+        expect(isStructureInstalled("sprinkler", installed)).toBe(true);
+        expect(isStructureInstalled("lightning-rod", installed)).toBe(false);
+        expect(isStructureInstalled("magnet", installed)).toBe(false);
     });
 });
 

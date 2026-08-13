@@ -28,7 +28,7 @@ import { Collector, defaultCollectorRegion } from "./game/collector";
 import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
-import { StormEvents, createStormEventRng } from "./game/storm-events";
+import { lightningRodStrikeCount, StormEvents, createStormEventRng } from "./game/storm-events";
 import { applyPayoutModifier, frontFromQuery, setSelectedFront } from "./game/fronts";
 import {
     STRUCTURES,
@@ -37,7 +37,9 @@ import {
     placeMagnet,
     placeSprinkler,
     tickSprinkler,
+    isStructureInstalled,
     type LightningRodState,
+    type SingularStructureId,
     type SprinklerState,
     type StructureId,
 } from "./game/structures";
@@ -250,6 +252,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     // structures use the same purchase flow as brushes but place once on click;
     // they are never painted as a drag stroke.
     const [selectedStructure, setSelectedStructure] = useState<StructureId | null>(null);
+    const [installedStructures, setInstalledStructures] = useState<
+        Record<SingularStructureId, boolean>
+    >({ sprinkler: false, "lightning-rod": false });
     const sprinklerRef = useRef<SprinklerState | null>(null);
     const lightningRodRef = useRef<LightningRodState | null>(null);
     const paintingRef = useRef(false);
@@ -399,9 +404,8 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                     tickSprinkler(e.simulation, sprinklerRef.current, s, dt);
                 }
                 if (lightningRodRef.current) {
-                    for (const event of events) {
-                        if (event.type === "lightning-front") runLightningRodStrike();
-                    }
+                    const rodStrikes = lightningRodStrikeCount(events, true);
+                    for (let i = 0; i < rodStrikes; i++) runLightningRodStrike();
                 }
                 hudTimer += dt;
                 if (hudTimer >= 0.1) {
@@ -499,6 +503,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             const placed = placeSprinkler(sim, stateRef.current, gx, gy);
             if (placed) {
                 sprinklerRef.current = placed;
+                setInstalledStructures((current) => ({ ...current, sprinkler: true }));
                 audioRef.current.buy();
                 setSelectedStructure(null);
                 setHud(snapshot(stateRef.current, autoStrikerRef.current));
@@ -508,6 +513,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             const placed = placeLightningRod(sim, stateRef.current, gx, gy);
             if (placed) {
                 lightningRodRef.current = placed;
+                setInstalledStructures((current) => ({ ...current, "lightning-rod": true }));
                 audioRef.current.buy();
                 setSelectedStructure(null);
                 setHud(snapshot(stateRef.current, autoStrikerRef.current));
@@ -667,6 +673,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     /** pick a one-click structure, or deselect it to return to attack mode. */
     const toggleStructure = (id: StructureId) => {
         audioRef.current.unlock();
+        if (isStructureInstalled(id, installedStructures)) return;
         setSelectedBrush(null);
         setSelectedStructure((cur) => (cur === id ? null : id));
     };
@@ -887,23 +894,29 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                     )}
                     {STRUCTURES.filter(
                         (structure) => structure.id !== "auto-striker" || hud.autoStrikerLevel === 0
-                    ).map((structure) => (
-                        <button
-                            key={structure.id}
-                            className={
-                                selectedStructure === structure.id ? "brush selected" : "brush"
-                            }
-                            disabled={
-                                selectedStructure !== structure.id &&
-                                !canPlaceStructure(stateRef.current, structure)
-                            }
-                            onClick={() => toggleStructure(structure.id)}
-                        >
-                            <span className="upgrade-name">{structure.name}</span>
-                            <span className="upgrade-desc">{structure.desc}</span>
-                            <span className="upgrade-cost">{formatNumber(structure.cost)}</span>
-                        </button>
-                    ))}
+                    ).map((structure) => {
+                        const installed = isStructureInstalled(structure.id, installedStructures);
+                        return (
+                            <button
+                                key={structure.id}
+                                className={
+                                    selectedStructure === structure.id ? "brush selected" : "brush"
+                                }
+                                disabled={
+                                    installed ||
+                                    (selectedStructure !== structure.id &&
+                                        !canPlaceStructure(stateRef.current, structure))
+                                }
+                                onClick={() => toggleStructure(structure.id)}
+                            >
+                                <span className="upgrade-name">{structure.name}</span>
+                                <span className="upgrade-desc">{structure.desc}</span>
+                                <span className="upgrade-cost">
+                                    {installed ? "installed" : formatNumber(structure.cost)}
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
                 <p className="hint">
                     {selectedStructure

@@ -6,6 +6,9 @@ import type { EconomyState } from "./economy";
 /** structure identifiers available in the in-storm placement flow. */
 export type StructureId = "auto-striker" | "magnet" | "sprinkler" | "lightning-rod";
 
+/** structures with one installed instance per storm. */
+export type SingularStructureId = "sprinkler" | "lightning-rod";
+
 /** fixed grid position for a placed structure. */
 export interface StructurePosition {
     readonly x: number;
@@ -91,6 +94,23 @@ export const SPRINKLER_OFFSETS: readonly StructurePosition[] = [
     { x: 2, y: -2 },
 ];
 
+/** distinct visible marker footprints for the singular structures. */
+export const SINGULAR_MARKER_OFFSETS: Readonly<Record<SingularStructureId, readonly StructurePosition[]>> = {
+    sprinkler: [
+        { x: 0, y: 0 },
+        { x: -1, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0, y: -1 },
+    ],
+    "lightning-rod": [
+        { x: 0, y: 0 },
+        { x: 0, y: -1 },
+        { x: 0, y: -2 },
+        { x: -1, y: -2 },
+        { x: 1, y: -2 },
+    ],
+};
+
 /** return the structure definition for `id`. */
 export function structureById(id: StructureId): StructureDef {
     const def = STRUCTURES.find((structure) => structure.id === id);
@@ -130,7 +150,20 @@ function markPlaced(sim: Simulation, id: StructureId): void {
     placedSingular.set(sim, ids);
 }
 
-/** place a one-cell metal marker after checking bounds, occupancy, cost, and singularity. */
+/** return whether an id consumes a singular structure slot. */
+export function isSingularStructure(id: StructureId): id is SingularStructureId {
+    return id === "sprinkler" || id === "lightning-rod";
+}
+
+/** return whether a singular structure is already installed in the supplied state. */
+export function isStructureInstalled(
+    id: StructureId,
+    installed: Readonly<Record<SingularStructureId, boolean>>
+): boolean {
+    return isSingularStructure(id) && installed[id];
+}
+
+/** place a distinct metal marker after checking its footprint, value, cost, and singularity. */
 function placeSingular(
     sim: Simulation,
     state: EconomyState,
@@ -140,9 +173,22 @@ function placeSingular(
 ): boolean {
     const def = structureById(id);
     if (alreadyPlaced(sim, id) || !canPlaceStructure(state, def)) return false;
-    if (x < 0 || y < 0 || x >= sim.W || y >= sim.H) return false;
-    if (sim.cells[y * sim.W + x] !== Mat.EMPTY) return false;
-    sim.paint(x, y, 0, Mat.METAL);
+    const footprint = SINGULAR_MARKER_OFFSETS[id];
+    for (const offset of footprint) {
+        const px = x + offset.x;
+        const py = y + offset.y;
+        if (
+            px < 0 ||
+            py < 0 ||
+            px >= sim.W ||
+            py >= sim.H ||
+            sim.cells[py * sim.W + px] !== Mat.EMPTY ||
+            sim.getValue(px, py) !== 0
+        ) {
+            return false;
+        }
+    }
+    for (const offset of footprint) sim.paint(x + offset.x, y + offset.y, 0, Mat.METAL);
     state.essence -= def.cost;
     markPlaced(sim, id);
     return true;

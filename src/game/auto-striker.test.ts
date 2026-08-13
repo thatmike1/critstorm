@@ -90,6 +90,32 @@ describe("auto-striker timer", () => {
 });
 
 describe("shared strike path", () => {
+    it("resolves forced results before the ledger without mutating the caller", () => {
+        const economy = createState();
+        const surge = new Surge(
+            {},
+            {
+                tierFloor: 3,
+                payoutForTier: (rolled, originalTier, tier) =>
+                    rolled.damage * Math.pow(2, tier - originalTier),
+            }
+        );
+        surge.addHeat(100);
+        const rolled = { damage: 10, tier: 1, golden: false };
+
+        const effective = executeResolvedStrike(
+            economy,
+            surge,
+            () => 0.5,
+            { onSurgeStart: vi.fn(), onStrike: vi.fn() },
+            rolled
+        );
+
+        expect(rolled).toEqual({ damage: 10, tier: 1, golden: false });
+        expect(effective).toEqual({ damage: 40, tier: 3, golden: false });
+        expect(economy.totalDamage).toBe(40);
+    });
+
     it("routes a forced rod result through the normal economy and capture path", () => {
         const economy = createState();
         const surge = new Surge({}, { criticalTemp: Number.POSITIVE_INFINITY });

@@ -24,6 +24,15 @@ export interface StormEvent {
     readonly erupted: number;
 }
 
+/** count the one semantic rod reward attached to each lightning-front event. */
+export function lightningRodStrikeCount(
+    events: readonly StormEvent[],
+    hasRod: boolean
+): number {
+    if (!hasRod) return 0;
+    return events.reduce((count, event) => count + (event.type === "lightning-front" ? 1 : 0), 0);
+}
+
 /** seconds between the first two events of a fresh storm. */
 export const INITIAL_STORM_EVENT_CADENCE = 42;
 /** lower bound on the event interval deep into a storm. */

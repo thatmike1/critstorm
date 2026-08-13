@@ -118,6 +118,16 @@ export interface LightningStrikeResult {
     readonly changedCells: readonly { x: number; y: number }[];
 }
 
+/** externally meaningful per-cell state used to filter lightning mutations. */
+interface StrikeCellState {
+    readonly material: number;
+    readonly heat: number;
+    readonly life: number;
+    readonly extra: number;
+    readonly stamp: number;
+    readonly value: number;
+}
+
 /**
  * headless falling-sand core: cells + heat field + step logic on plain typed
  * arrays, with no DOM/canvas dependency. writeImage() fills the core-owned
@@ -433,26 +443,24 @@ export class Simulation {
      */
     private zap(x: number, y: number): boolean {
         if (x < 0 || y < 0 || x >= this.W || y >= this.H) return true;
-        const changed = this.strikeChangedSet;
-        if (changed) {
-            const key = y * this.W + x;
-            if (!changed.has(key)) {
-                changed.add(key);
-                this.strikeChangedCells?.push({ x, y });
-            }
-        }
         const i = y * this.W + x;
+        const before = this.strikeCellState(i);
         const m = this.cells[i];
         if (this.heat[i] < emitTemp[Mat.LIGHTNING]) this.heat[i] = emitTemp[Mat.LIGHTNING];
         this.wake(x, y);
         if (m === Mat.EMPTY) {
             this.setCell(x, y, Mat.LIGHTNING); // re-seeds heat via assignSpawnHeat
+            this.recordStrikeMutation(i, before);
             return false;
         }
         // A jagged leader can re-cross a cell it already lit; passing through its own
         // plasma (rather than dead-ending on it) is what lets a zigzagging bolt still
         // reach the ground instead of fizzling in mid-air on a self-intersection.
-        if (m === Mat.LIGHTNING) return false;
+        if (m === Mat.LIGHTNING) {
+            this.recordStrikeMutation(i, before);
+            return false;
+        }
+        this.recordStrikeMutation(i, before);
         return !this.isConductor(m); // conductors pass through; everything else stops
     }
 
@@ -472,6 +480,38 @@ export class Simulation {
             }
         }
         return 0;
+    }
+
+    /** snapshot the fields whose mutation is observable outside lightning tracing. */
+    private strikeCellState(i: number): StrikeCellState {
+        return {
+            material: this.cells[i],
+            heat: this.heat[i],
+            life: this.life[i],
+            extra: this.extra[i],
+            stamp: this.stamp[i],
+            value: this.value[i],
+        };
+    }
+
+    /** record a cell only when lightning changed an externally meaningful field. */
+    private recordStrikeMutation(i: number, before: StrikeCellState): void {
+        const changed = this.strikeChangedSet;
+        const cells = this.strikeChangedCells;
+        if (!changed || !cells) return;
+        if (
+            before.material === this.cells[i] &&
+            before.heat === this.heat[i] &&
+            before.life === this.life[i] &&
+            before.extra === this.extra[i] &&
+            before.stamp === this.stamp[i] &&
+            before.value === this.value[i]
+        ) {
+            return;
+        }
+        if (changed.has(i)) return;
+        changed.add(i);
+        cells.push({ x: i % this.W, y: Math.floor(i / this.W) });
     }
 
     /**

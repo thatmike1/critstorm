@@ -244,7 +244,7 @@ export function executeStrike(
         surge,
         rng,
         callbacks,
-        surge.resolveResult(rollAttack(economy, rng)),
+        rollAttack(economy, rng),
         target,
         heat,
         spreadTarget
@@ -263,11 +263,12 @@ export function executeResolvedStrike(
     spreadTarget: boolean = true
 ): AttackResult {
     if (surge.addHeat(heat)) callbacks.onSurgeStart();
-    applyAttack(economy, result);
-    const captured = surge.recordStrike(result, baseDamage(economy));
-    const impact = target && spreadTarget ? applyStrikeSpread(target, result.tier, rng) : target;
-    callbacks.onStrike(result, captured, impact);
-    return result;
+    const effective = surge.resolveResult(result);
+    applyAttack(economy, effective);
+    const captured = surge.recordStrike(effective, baseDamage(economy));
+    const impact = target && spreadTarget ? applyStrikeSpread(target, effective.tier, rng) : target;
+    callbacks.onStrike(effective, captured, impact);
+    return effective;
 }
 
 /** render the placed turret at its grid position with a brief muzzle tell on fire. */
