@@ -15,6 +15,7 @@ import {
     createAutoStrikerState,
     defaultAutoStrikerPosition,
     executeStrike,
+    executeResolvedStrike,
     placeAutoStriker,
     tickAutoStriker,
     upgradeAutoStriker,
@@ -89,6 +90,44 @@ describe("auto-striker timer", () => {
 });
 
 describe("shared strike path", () => {
+    it("routes a forced rod result through the normal economy and capture path", () => {
+        const economy = createState();
+        const surge = new Surge({}, { criticalTemp: Number.POSITIVE_INFINITY });
+        const onStrike = vi.fn();
+        const result = { damage: 256, tier: 8, golden: false };
+
+        executeResolvedStrike(
+            economy,
+            surge,
+            () => 0.5,
+            { onSurgeStart: vi.fn(), onStrike },
+            result,
+            { x: 8, y: 9 },
+            undefined,
+            false
+        );
+
+        expect(economy.totalDamage).toBe(256);
+        expect(onStrike).toHaveBeenCalledWith(result, false, { x: 8, y: 9 });
+        surge.addHeat(100);
+        executeResolvedStrike(
+            economy,
+            surge,
+            () => 0.5,
+            { onSurgeStart: vi.fn(), onStrike },
+            { damage: 256, tier: 8, golden: false },
+            { x: 8, y: 9 },
+            undefined,
+            false
+        );
+        expect(surge.pot.contributions).toBe(256);
+        expect(onStrike).toHaveBeenLastCalledWith(
+            { damage: 256, tier: 8, golden: false },
+            true,
+            { x: 8, y: 9 }
+        );
+    });
+
     it("routes manual and timer strikes through the same heat and attack bookkeeping", () => {
         const economy = createState();
         const surge = new Surge();

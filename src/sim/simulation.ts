@@ -110,6 +110,14 @@ export interface GoldLossEvent {
     cause: GoldLossCause;
 }
 
+/** deterministic source used by seeded physical lightning. */
+export type SimulationRng = () => number;
+
+/** cells touched while tracing one physical lightning event. */
+export interface LightningStrikeResult {
+    readonly changedCells: readonly { x: number; y: number }[];
+}
+
 /**
  * headless falling-sand core: cells + heat field + step logic on plain typed
  * arrays, with no DOM/canvas dependency. writeImage() fills the core-owned
@@ -151,6 +159,9 @@ export class Simulation {
     // renderer/audio layer turns that into a flash + blip so risk reads instantly.
     // null by default => the sim runs standalone with zero feedback overhead.
     private onGoldLoss: ((e: GoldLossEvent) => void) | null = null;
+    private strikeRng: SimulationRng | null = null;
+    private strikeChangedCells: Array<{ x: number; y: number }> | null = null;
+    private strikeChangedSet: Set<number> | null = null;
 
     // Dirty-chunk scheduler: only chunks flagged active get simulated.
     readonly chunkW: number;
@@ -211,11 +222,12 @@ export class Simulation {
     }
 
     private assignSpawnLife(i: number, mat: number): void {
-        if (mat === Mat.FIRE) this.life[i] = 90 + ((Math.random() * 50) | 0);
-        else if (mat === Mat.SMOKE) this.life[i] = 90 + ((Math.random() * 100) | 0);
-        else if (mat === Mat.STEAM) this.life[i] = Math.min(255, 130 + ((Math.random() * 120) | 0));
+        const random = this.strikeRng ?? Math.random;
+        if (mat === Mat.FIRE) this.life[i] = 90 + ((random() * 50) | 0);
+        else if (mat === Mat.SMOKE) this.life[i] = 90 + ((random() * 100) | 0);
+        else if (mat === Mat.STEAM) this.life[i] = Math.min(255, 130 + ((random() * 120) | 0));
         else if (mat === Mat.LIGHTNING)
-            this.life[i] = 5 + ((Math.random() * 5) | 0); // brief flash
+            this.life[i] = 5 + ((random() * 5) | 0); // brief flash
         else this.life[i] = 0;
     }
 
@@ -237,7 +249,7 @@ export class Simulation {
         const i = y * this.W + x;
         if (!goldPhaseCarry(this.cells[i], mat)) this.value[i] = 0;
         this.cells[i] = mat;
-        this.extra[i] = (Math.random() * 256) | 0;
+        this.extra[i] = ((this.strikeRng ?? Math.random)() * 256) | 0;
         this.assignSpawnLife(i, mat);
         this.assignSpawnHeat(i, mat);
         this.stamp[i] = this.frame;
@@ -421,6 +433,14 @@ export class Simulation {
      */
     private zap(x: number, y: number): boolean {
         if (x < 0 || y < 0 || x >= this.W || y >= this.H) return true;
+        const changed = this.strikeChangedSet;
+        if (changed) {
+            const key = y * this.W + x;
+            if (!changed.has(key)) {
+                changed.add(key);
+                this.strikeChangedCells?.push({ x, y });
+            }
+        }
         const i = y * this.W + x;
         const m = this.cells[i];
         if (this.heat[i] < emitTemp[Mat.LIGHTNING]) this.heat[i] = emitTemp[Mat.LIGHTNING];
@@ -464,16 +484,17 @@ export class Simulation {
             if (this.zap(x, y)) return; // hit ground / solid / edge
             if (y >= this.H - 1) return; // reached the floor
             const pull = this.conductorPull(x, y);
-            const jitter = Math.random() < 0.34 ? -1 : Math.random() < 0.5 ? 1 : 0;
+            const random = this.strikeRng ?? Math.random;
+            const jitter = random() < 0.34 ? -1 : random() < 0.5 ? 1 : 0;
             let dx = jitter + pull;
             dx = dx < -1 ? -1 : dx > 1 ? 1 : dx;
-            const dy = Math.random() < 0.82 ? 1 : 0;
+            const dy = random() < 0.82 ? 1 : 0;
             const nx = x + dx;
             let ny = y + dy;
             if (nx === x && ny === y) ny = y + 1; // never stall in place
             // fork a child bolt sideways now and then for that branched look
-            if (depth < 2 && Math.random() < 0.07) {
-                this.bolt(x + (Math.random() < 0.5 ? -1 : 1), y + 1, depth + 1, maxSteps >> 1);
+            if (depth < 2 && random() < 0.07) {
+                this.bolt(x + (random() < 0.5 ? -1 : 1), y + 1, depth + 1, maxSteps >> 1);
             }
             x = nx;
             y = ny;
@@ -485,9 +506,19 @@ export class Simulation {
      * entry point. The bolt and all its branches are traced synchronously; the
      * resulting LIGHTNING cells then flash and fade over the next few frames.
      */
-    strike(sx: number, sy: number): void {
-        if (sx < 0 || sy < 0 || sx >= this.W || sy >= this.H) return;
-        this.bolt(sx, sy, 0, this.H + 40);
+    strike(sx: number, sy: number, rng: SimulationRng = Math.random): LightningStrikeResult {
+        if (sx < 0 || sy < 0 || sx >= this.W || sy >= this.H) return { changedCells: [] };
+        this.strikeRng = rng;
+        this.strikeChangedCells = [];
+        this.strikeChangedSet = new Set<number>();
+        try {
+            this.bolt(sx, sy, 0, this.H + 40);
+            return { changedCells: this.strikeChangedCells };
+        } finally {
+            this.strikeRng = null;
+            this.strikeChangedCells = null;
+            this.strikeChangedSet = null;
+        }
     }
 
     /** try to slide `mat` one cell toward (tx,ty), carrying its value through a swap. */
