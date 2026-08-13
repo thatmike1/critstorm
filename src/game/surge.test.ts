@@ -12,7 +12,14 @@ import {
     type SurgeEndReason,
     type PotState,
 } from "./surge";
-import { createState, rollAttack, baseDamage, type AttackResult } from "./economy";
+import {
+    createState,
+    rollAttack,
+    baseDamage,
+    critMulti,
+    type AttackResult,
+} from "./economy";
+import { executeStrike } from "./auto-striker";
 import { mulberry32 } from "../../sim/rng";
 
 /** a non-crit strike (tier 0). */
@@ -151,31 +158,37 @@ describe("Surge pot accrual", () => {
             (result: AttackResult, originalTier: number, tier: number) =>
                 result.damage * Math.pow(2, tier - originalTier)
         );
-        const result = crit(10, 1);
+        const rolled = crit(10, 1);
         const s = new Surge({}, { tierFloor: 3, payoutForTier });
         s.addHeat(100);
+        const result = s.resolveResult(rolled);
 
         expect(s.recordStrike(result, 5)).toBe(true);
         expect(result.tier).toBe(3);
         expect(result.damage).toBe(40);
-        expect(payoutForTier).toHaveBeenCalledWith(result, 1, 3);
+        expect(rolled).toEqual({ damage: 10, tier: 1, golden: false });
+        expect(payoutForTier).toHaveBeenCalledWith(rolled, 1, 3);
         expect(s.pot.contributions).toBe(40);
     });
 
-    it("does not floor non-crits or alter tiers already above the floor", () => {
-        const payoutForTier = vi.fn((result: AttackResult) => result.damage * 99);
-        const s = new Surge({}, { tierFloor: 3, payoutForTier });
+    it("uses the raised tier's heat band while preserving non-crits and high tiers", () => {
+        const payoutForTier = vi.fn((result: AttackResult) => result.damage);
+        const s = new Surge({}, { rng: () => 0, tierFloor: 3, payoutForTier });
         s.addHeat(100);
 
         const normalHit = normal(999);
         s.recordStrike(normalHit, 5);
         const highCrit = crit(20, 4);
-        s.recordStrike(highCrit, 5);
+        const effectiveHighCrit = s.resolveResult(highCrit);
+        const raisedCrit = s.resolveResult(crit(10, 1));
+        s.recordStrike(effectiveHighCrit, 5);
+        s.recordStrike(raisedCrit, 5);
 
         expect(normalHit).toEqual({ damage: 999, tier: 0, golden: false });
         expect(highCrit).toEqual({ damage: 20, tier: 4, golden: false });
-        expect(payoutForTier).not.toHaveBeenCalled();
-        expect(s.pot.contributions).toBe(25);
+        expect(payoutForTier).toHaveBeenCalledTimes(1);
+        expect(s.coreTemp).toBe(CRIT_SPIKE_BANDS[4][0] + CRIT_SPIKE_BANDS[3][0]);
+        expect(s.pot.contributions).toBe(5 + 20 + 10);
     });
 
     it("does not floor strikes outside a live surge", () => {
@@ -183,9 +196,39 @@ describe("Surge pot accrual", () => {
         const result = crit(10, 1);
         const s = new Surge({}, { tierFloor: 3, payoutForTier });
 
-        expect(s.recordStrike(result, 5)).toBe(false);
+        const effective = s.resolveResult(result);
+        expect(s.recordStrike(effective, 5)).toBe(false);
         expect(result).toEqual({ damage: 10, tier: 1, golden: false });
+        expect(effective).toEqual(result);
         expect(payoutForTier).not.toHaveBeenCalled();
+    });
+
+    it("keeps the raised golden payout identical in the economy ledger and pot", () => {
+        const economy = createState();
+        economy.levels.golden = 1;
+        const surge = new Surge(
+            {},
+            {
+                tierFloor: 3,
+                payoutForTier: (result, originalTier, tier) =>
+                    result.damage * Math.pow(critMulti(economy), tier - originalTier),
+            }
+        );
+        surge.addHeat(100);
+
+        const result = executeStrike(
+            economy,
+            surge,
+            (() => {
+                const rolls = [0, 1, 0];
+                return () => rolls.shift() ?? 1;
+            })(),
+            { onSurgeStart: () => undefined, onStrike: () => undefined }
+        );
+
+        expect(result).toEqual({ damage: 200, tier: 3, golden: true });
+        expect(economy.totalDamage).toBe(result.damage);
+        expect(surge.pot.contributions).toBe(result.damage);
     });
 });
 
