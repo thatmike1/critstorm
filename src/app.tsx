@@ -30,18 +30,23 @@ import { applyPayoutModifier, frontFromQuery, setSelectedFront } from "./game/fr
 import { STRUCTURES, canPlaceStructure, placeMagnet, type StructureId } from "./game/structures";
 import {
     AUTO_STRIKER_MAX_LEVEL,
+    OVERCLOCK_BANK_CRITS,
+    OVERCLOCK_MAX_STACKS,
     autoStrikerAim,
     autoStrikerInterval,
     autoStrikerStrikeHeat,
+    autoStrikerSurgeHeat,
     autoStrikerUpgradeCost,
     canUpgradeAutoStriker,
     createAutoStrikerState,
     defaultAutoStrikerPosition,
     executeStrike,
     placeAutoStriker,
+    settleAutoStrikerOverclock,
     tickAutoStriker,
     upgradeAutoStriker,
     type AutoStrikerState,
+    type StrikeSource,
     type StrikeTarget,
 } from "./game/auto-striker";
 import {
@@ -89,6 +94,8 @@ interface HudState {
     autoStrikerInterval: number;
     autoStrikerCost: number;
     autoStrikerAffordable: boolean;
+    autoStrikerOverclockStacks: number;
+    autoStrikerSurgeHeat: number;
 }
 
 interface InitialGameState {
@@ -119,6 +126,8 @@ function snapshot(s: EconomyState, autoStriker: AutoStrikerState): HudState {
         autoStrikerInterval: interval,
         autoStrikerCost: autoStrikerUpgradeCost(autoStriker),
         autoStrikerAffordable: canUpgradeAutoStriker(s, autoStriker),
+        autoStrikerOverclockStacks: autoStriker.overclockStacks,
+        autoStrikerSurgeHeat: autoStrikerSurgeHeat(autoStriker),
     };
 }
 
@@ -174,6 +183,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         new Surge(
             {
                 onEnd: (reason, pot) => {
+                    settleAutoStrikerOverclock(autoStrikerRef.current, reason, pot);
                     if (reason !== "bust") return;
                     engineRef.current?.bust(pot);
                     // INTERIM blow-up condition (npq.2): an overheat bust while the world
@@ -246,7 +256,12 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
      * path. `target` is the aim point in grid cells; `heat` defaults to the manual
      * per-click fill and turret fires pass their cadence-scaled heat instead.
      */
-    const runStrike = (target?: StrikeTarget, heat?: number): void => {
+    const runStrike = (
+        target?: StrikeTarget,
+        heat?: number,
+        source: StrikeSource = "manual",
+        capturedAutoCoreHeat = 0
+    ): void => {
         executeStrike(
             stateRef.current,
             surgeRef.current,
@@ -273,7 +288,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 },
             },
             target,
-            heat
+            heat,
+            source,
+            capturedAutoCoreHeat
         );
     };
 
@@ -336,7 +353,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                     // point (seedable rng seam) and the cadence-scaled heat fill.
                     runStrike(
                         autoStrikerAim(engine!.storm.strikeZone, Math.random),
-                        autoStrikerStrikeHeat(autoStrikerRef.current)
+                        autoStrikerStrikeHeat(autoStrikerRef.current),
+                        "automatic",
+                        autoStrikerSurgeHeat(autoStrikerRef.current)
                     );
                 });
                 // the front's reward knob applies at the mint (design §4.5): the bog's
@@ -817,10 +836,17 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                             onClick={buyAutoStrikerUpgrade}
                         >
                             <span className="upgrade-name">
-                                Auto-Striker <em>lv{hud.autoStrikerLevel}</em>
+                                Auto-Striker <em>lv{hud.autoStrikerLevel}</em>{" "}
+                                <em>
+                                    OC {hud.autoStrikerOverclockStacks}/{OVERCLOCK_MAX_STACKS}
+                                </em>
                             </span>
                             <span className="upgrade-desc">
-                                fires every {hud.autoStrikerInterval.toFixed(1)}s
+                                fires every {hud.autoStrikerInterval.toFixed(2)}s · +
+                                {hud.autoStrikerSurgeHeat.toFixed(1)} core heat in surge
+                            </span>
+                            <span className="upgrade-desc">
+                                bank at {OVERCLOCK_BANK_CRITS} crits to charge · bust drains 1
                             </span>
                             <span className="upgrade-cost">
                                 {hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL

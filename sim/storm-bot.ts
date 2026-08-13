@@ -19,11 +19,13 @@ import {
 import {
     autoStrikerInterval,
     autoStrikerStrikeHeat,
+    autoStrikerSurgeHeat,
     autoStrikerUpgradeCost,
     canUpgradeAutoStriker,
     createAutoStrikerState,
     executeStrike,
     placeAutoStriker,
+    settleAutoStrikerOverclock,
     tickAutoStriker,
     upgradeAutoStriker,
 } from "../src/game/auto-striker";
@@ -66,6 +68,8 @@ export interface StormBotProfile {
     readonly buyDpsUpgrades: boolean;
     /** whether the competent purchase policy may place and upgrade the turret. */
     readonly allowAutoStriker: boolean;
+    /** whether eligible bank/bust exits settle the turret's ephemeral overclock. */
+    readonly allowAutoStrikerOverclock: boolean;
 }
 
 /** the fresh v0.1 player reference: sustained but plausible 2.5 clicks per second. */
@@ -75,6 +79,7 @@ export const FRESH_PACING_PROFILE: StormBotProfile = {
     paintFirstStoneStroke: true,
     buyDpsUpgrades: true,
     allowAutoStriker: false,
+    allowAutoStrikerOverclock: false,
 };
 
 /** the long-arc reference profile, including existing physical automation. */
@@ -82,14 +87,23 @@ export const COMPETENT_PACING_PROFILE: StormBotProfile = {
     ...FRESH_PACING_PROFILE,
     name: "competent-auto-striker",
     allowAutoStriker: true,
+    allowAutoStrikerOverclock: true,
 };
 
 /** create the paired long-arc profile used for the auto-striker causal ablation. */
-export function competentPacingProfile(allowAutoStriker: boolean): StormBotProfile {
+export function competentPacingProfile(
+    allowAutoStriker: boolean,
+    allowAutoStrikerOverclock = allowAutoStriker
+): StormBotProfile {
     return {
         ...COMPETENT_PACING_PROFILE,
-        name: allowAutoStriker ? "competent-auto-striker" : "competent-no-auto-striker",
+        name: !allowAutoStriker
+            ? "competent-no-auto-striker"
+            : allowAutoStrikerOverclock
+              ? "competent-auto-striker-overclock"
+              : "competent-auto-striker-no-overclock",
         allowAutoStriker,
+        allowAutoStrikerOverclock: allowAutoStriker && allowAutoStrikerOverclock,
     };
 }
 
@@ -113,6 +127,7 @@ export interface StormBotSample {
     cores: number;
     coresPerMin: number;
     autoStrikerLevel: number;
+    autoStrikerOverclockStacks: number;
 }
 
 /** median sample row across one deterministic seed sweep. */
@@ -160,8 +175,13 @@ export interface StormBotSummary {
     automaticRoutedAttacks: number;
     automaticCapturedAttacks: number;
     autoStrikerLevel: number;
+    autoStrikerOverclockStacks: number;
     autoStrikerEssenceSpent: number;
     autoStrikerBankedEssenceDelta: number;
+    autoStrikerOverclockEnabled: boolean;
+    autoStrikerOverclockBankGains: number;
+    autoStrikerOverclockBustLosses: number;
+    autoStrikerSurgeHeatAdded: number;
     /** raw value generated outside surges and queued toward the collector. */
     routedValue: number;
     bankedPotValue: number;
@@ -341,6 +361,9 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
     let automaticCapturedAttacks = 0;
     let autoStrikerEssenceSpent = 0;
     let autoStrikerBankedEssenceDelta = 0;
+    let autoStrikerOverclockBankGains = 0;
+    let autoStrikerOverclockBustLosses = 0;
+    let autoStrikerSurgeHeatAdded = 0;
     let routedValue = 0;
     let bankedPotValue = 0;
     let bustedPotValue = 0;
@@ -379,6 +402,13 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
 
     /** route a completed surge exactly once: banked pots collect, busted pots are lost. */
     const settlePot = (reason: "bank" | "bust", pot: PotState): void => {
+        if (profile.allowAutoStrikerOverclock) {
+            const stacksBefore = autoStriker.overclockStacks;
+            settleAutoStrikerOverclock(autoStriker, reason, pot);
+            const stackDelta = autoStriker.overclockStacks - stacksBefore;
+            if (stackDelta > 0) autoStrikerOverclockBankGains += stackDelta;
+            else if (stackDelta < 0) autoStrikerOverclockBustLosses -= stackDelta;
+        }
         if (reason === "bank") {
             banks += 1;
             bankedPotValue += pot.value;
@@ -415,6 +445,7 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
                 cores,
                 coresPerMin: cores / minute,
                 autoStrikerLevel: autoStriker.level,
+                autoStrikerOverclockStacks: autoStriker.overclockStacks,
             });
             nextSample += 1;
         }
@@ -506,6 +537,11 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
     /** route one strike through shared attack, surge, collection, and source ledgers. */
     const runStrike = (source: "manual" | "automatic", heat?: number): void => {
         attacks += 1;
+        const capturedAutoCoreHeat =
+            source === "automatic" && profile.allowAutoStrikerOverclock
+                ? autoStrikerSurgeHeat(autoStriker)
+                : 0;
+        const coreTempBefore = surge.coreTemp;
         executeStrike(
             economy,
             surge,
@@ -525,8 +561,16 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
                 },
             },
             undefined,
-            heat
+            heat,
+            source,
+            capturedAutoCoreHeat
         );
+        if (source === "automatic" && surge.coreTemp > coreTempBefore) {
+            autoStrikerSurgeHeatAdded += Math.min(
+                capturedAutoCoreHeat,
+                surge.coreTemp - coreTempBefore
+            );
+        }
         decideBank();
     };
 
@@ -608,8 +652,13 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
         automaticRoutedAttacks,
         automaticCapturedAttacks,
         autoStrikerLevel: autoStriker.level,
+        autoStrikerOverclockStacks: autoStriker.overclockStacks,
         autoStrikerEssenceSpent,
         autoStrikerBankedEssenceDelta,
+        autoStrikerOverclockEnabled: profile.allowAutoStrikerOverclock,
+        autoStrikerOverclockBankGains,
+        autoStrikerOverclockBustLosses,
+        autoStrikerSurgeHeatAdded,
         routedValue,
         bankedPotValue,
         bustedPotValue,

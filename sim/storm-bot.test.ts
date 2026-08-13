@@ -8,7 +8,6 @@ import {
     competentPacingProfile,
     FRESH_PACING_PROFILE,
     LATE_PACING_SAMPLE_MINUTES,
-    LATE_PACING_TARGETS,
     PACING_COLLECTION_DELAY_SEC,
     PACING_STEP_SEC,
     runStormBot,
@@ -35,13 +34,16 @@ function referenceSweep(): StormBotSummary[] {
     );
 }
 
-/** run one side of the paired 129-seed competent-profile ablation. */
-function lateSweep(allowAutoStriker: boolean): StormBotSummary[] {
+/** run one side of the 129-seed turret/overclock causal ablation. */
+function lateSweep(
+    allowAutoStriker: boolean,
+    allowAutoStrikerOverclock = allowAutoStriker
+): StormBotSummary[] {
     return Array.from({ length: 129 }, (_, i) =>
         runStormBot({
             durationSec: 35 * 60,
             seed: (1000 + i * 40507) | 0,
-            profile: competentPacingProfile(allowAutoStriker),
+            profile: competentPacingProfile(allowAutoStriker, allowAutoStrikerOverclock),
             strategy: bankAtN(6),
             sampleAtMinutes: LATE_PACING_SAMPLE_MINUTES,
         })
@@ -277,13 +279,33 @@ describe("competent late-storm pacing profile", () => {
         );
     });
 
-    it("pins the 129-seed enabled and disabled late-arc distributions", () => {
-        const enabledRuns = lateSweep(true);
-        const disabledRuns = lateSweep(false);
-        const enabled = summarizeLatePacing(enabledRuns);
-        const disabled = summarizeLatePacing(disabledRuns);
+    it("pins the 129-seed overclock, baseline turret, and no-turret distributions", () => {
+        const overclockRuns = lateSweep(true, true);
+        const baselineRuns = lateSweep(true, false);
+        const noTurretRuns = lateSweep(false, false);
+        const overclock = summarizeLatePacing(overclockRuns);
+        const baseline = summarizeLatePacing(baselineRuns);
+        const noTurret = summarizeLatePacing(noTurretRuns);
 
-        expect(roundedReport(enabled)).toEqual({
+        expect(roundedReport(overclock)).toEqual({
+            trials: 129,
+            samples: [
+                { minute: 8, cumulativeEssence: 42994082, coresPerMin: 36.625 },
+                { minute: 15, cumulativeEssence: 630221142, coresPerMin: 74.8 },
+                { minute: 20, cumulativeEssence: 1541940689, coresPerMin: 87.8 },
+                { minute: 22, cumulativeEssence: 2771247738, coresPerMin: 107 },
+                { minute: 25, cumulativeEssence: 4492659239, coresPerMin: 119.88 },
+                { minute: 29, cumulativeEssence: 9399055469, coresPerMin: 149.483 },
+                { minute: 30, cumulativeEssence: 14560311357, coresPerMin: 179.867 },
+                { minute: 35, cumulativeEssence: 34121839384, coresPerMin: 236 },
+            ],
+            essenceGrowth20To30: 9.443,
+            essenceGrowth25To35: 7.595,
+            coarseCoresPerMinGrowth: [1.042, 0.43, 0.397, 0.579],
+            coresPerMin35Over30Growth: 0.312,
+            passes: true,
+        });
+        expect(roundedReport(baseline)).toEqual({
             trials: 129,
             samples: [
                 { minute: 8, cumulativeEssence: 46643651, coresPerMin: 38.125 },
@@ -301,7 +323,7 @@ describe("competent late-storm pacing profile", () => {
             coresPerMin35Over30Growth: 0.074,
             passes: false,
         });
-        expect(roundedReport(disabled)).toEqual({
+        expect(roundedReport(noTurret)).toEqual({
             trials: 129,
             samples: [
                 { minute: 8, cumulativeEssence: 17771437, coresPerMin: 23.5 },
@@ -320,26 +342,27 @@ describe("competent late-storm pacing profile", () => {
             passes: true,
         });
 
-        expect(enabled.essenceGrowth20To30).toBeGreaterThanOrEqual(
-            LATE_PACING_TARGETS.minimumEssenceGrowth
-        );
-        expect(enabled.essenceGrowth25To35).toBeLessThan(
-            LATE_PACING_TARGETS.minimumEssenceGrowth
-        );
-        expect(enabled.coresPerMin35Over30Growth).toBeLessThan(
-            LATE_PACING_TARGETS.minimumThirtyFiveOverThirtyCoresPerMinGrowth
-        );
-        expect(enabled.samples.at(-1)!.coresPerMin).toBeLessThan(
-            disabled.samples.at(-1)!.coresPerMin
-        );
-        // The no-auto ablation passes while the existing turret misses the two
-        // late-window gates. This disproves the proposed causal lever; it does not
-        // justify changing automation or adding another mechanic in this branch.
-        expect(enabled.passes).toBe(false);
-        expect(disabled.passes).toBe(true);
-        expect(enabled.essenceGrowth25To35).toBeLessThan(disabled.essenceGrowth25To35);
+        expect(overclock.passes).toBe(true);
+        expect(baseline.passes).toBe(false);
+        expect(noTurret.passes).toBe(true);
 
-        for (const summary of [...enabledRuns, ...disabledRuns]) {
+        const overclock35 = overclock.samples.at(-1)!.coresPerMin;
+        const baseline35 = baseline.samples.at(-1)!.coresPerMin;
+        const noTurret35 = noTurret.samples.at(-1)!.coresPerMin;
+        const deficitClosed = (overclock35 - baseline35) / (noTurret35 - baseline35);
+        expect(deficitClosed).toBeGreaterThanOrEqual(0.9);
+        expect(overclock35 / noTurret35).toBeGreaterThanOrEqual(0.95);
+        expect(overclock35).toBeLessThan(noTurret35);
+
+        for (const summary of overclockRuns) {
+            expect(summary.autoStrikerLevel).toBeGreaterThan(0);
+            expect(summary.automaticRoutedAttacks).toBeGreaterThan(0);
+            expect(summary.automaticCapturedAttacks).toBeGreaterThan(0);
+            expect(summary.autoStrikerOverclockBankGains).toBeGreaterThan(0);
+            expect(summary.autoStrikerSurgeHeatAdded).toBeGreaterThan(0);
+        }
+
+        for (const summary of [...overclockRuns, ...baselineRuns, ...noTurretRuns]) {
             const accounted =
                 summary.pendingValue + summary.rawCollectedValue + summary.lostValue;
             expect(Math.abs(summary.generatedValue - accounted)).toBeLessThanOrEqual(
