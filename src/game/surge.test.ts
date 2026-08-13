@@ -145,6 +145,48 @@ describe("Surge pot accrual", () => {
         expect(s.pot.value).toBe(0);
         expect(s.active).toBe(false);
     });
+
+    it("raises captured crits to the workshop floor and recalculates their payout", () => {
+        const payoutForTier = vi.fn(
+            (result: AttackResult, originalTier: number, tier: number) =>
+                result.damage * Math.pow(2, tier - originalTier)
+        );
+        const result = crit(10, 1);
+        const s = new Surge({}, { tierFloor: 3, payoutForTier });
+        s.addHeat(100);
+
+        expect(s.recordStrike(result, 5)).toBe(true);
+        expect(result.tier).toBe(3);
+        expect(result.damage).toBe(40);
+        expect(payoutForTier).toHaveBeenCalledWith(result, 1, 3);
+        expect(s.pot.contributions).toBe(40);
+    });
+
+    it("does not floor non-crits or alter tiers already above the floor", () => {
+        const payoutForTier = vi.fn((result: AttackResult) => result.damage * 99);
+        const s = new Surge({}, { tierFloor: 3, payoutForTier });
+        s.addHeat(100);
+
+        const normalHit = normal(999);
+        s.recordStrike(normalHit, 5);
+        const highCrit = crit(20, 4);
+        s.recordStrike(highCrit, 5);
+
+        expect(normalHit).toEqual({ damage: 999, tier: 0, golden: false });
+        expect(highCrit).toEqual({ damage: 20, tier: 4, golden: false });
+        expect(payoutForTier).not.toHaveBeenCalled();
+        expect(s.pot.contributions).toBe(25);
+    });
+
+    it("does not floor strikes outside a live surge", () => {
+        const payoutForTier = vi.fn((result: AttackResult) => result.damage * 2);
+        const result = crit(10, 1);
+        const s = new Surge({}, { tierFloor: 3, payoutForTier });
+
+        expect(s.recordStrike(result, 5)).toBe(false);
+        expect(result).toEqual({ damage: 10, tier: 1, golden: false });
+        expect(payoutForTier).not.toHaveBeenCalled();
+    });
 });
 
 describe("Surge exit seam", () => {

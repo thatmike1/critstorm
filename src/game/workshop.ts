@@ -526,9 +526,7 @@ export interface WorkshopEffects {
     /** Front: permanent storm event modifiers. CONSUMED LATER — the scheduler
      * takes no modifiers until npq.1 wires them in. */
     eventModifiers: readonly StormEventModifier[];
-    /** Front: minimum tier a surge crit counts as. CONSUMED LATER — whether the
-     * floor raises payouts alongside heat spikes is decided by the Front wiring
-     * issue, so the surge machine keeps its base floor until then. */
+    /** Front: minimum tier for a captured crit during a live surge. */
     surgeTierFloor: number;
 }
 

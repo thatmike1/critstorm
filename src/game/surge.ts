@@ -157,6 +157,10 @@ export interface SurgeOptions {
     criticalTemp?: number;
     /** ambient-ramp coefficient `q`; defaults to {@link AMBIENT_HEAT_COEFF}. */
     ambientCoeff?: number;
+    /** minimum tier for captured surge crits; non-crits and outside strikes are unchanged. */
+    tierFloor?: number;
+    /** recalculate a captured crit's payout when the tier floor raises its tier. */
+    payoutForTier?: (result: AttackResult, originalTier: number, tier: number) => number;
 }
 
 /** `M = 1.5^n` for `n` crits landed this surge (design §3/§6). */
@@ -186,12 +190,19 @@ export class Surge {
     private readonly rng: SurgeRng;
     private readonly _criticalTemp: number;
     private readonly ambientCoeff: number;
+    private readonly tierFloor: number;
+    private readonly payoutForTier: SurgeOptions["payoutForTier"];
 
     constructor(listeners: SurgeListeners = {}, options: SurgeOptions = {}) {
         this.listeners = listeners;
         this.rng = options.rng ?? Math.random;
         this._criticalTemp = options.criticalTemp ?? CORE_CRITICAL_TEMP;
         this.ambientCoeff = options.ambientCoeff ?? AMBIENT_HEAT_COEFF;
+        this.tierFloor = Math.max(
+            SURGE_TIER_FLOOR,
+            Math.floor(options.tierFloor ?? SURGE_TIER_FLOOR)
+        );
+        this.payoutForTier = options.payoutForTier;
     }
 
     /** current phase: `idle` (filling heat) or `surging` (a pot is live). */
@@ -268,7 +279,8 @@ export class Surge {
      * pot can overheat the core. if the spike pushes the core past critical the surge
      * busts immediately (the exit seam fires with reason `bust`, capturing this crit
      * in the pot — you rode it, it pumped, then it burned). a no-op outside a surge.
-     * @param result the rolled attack; `tier > 0` marks it a crit.
+     * @param result the rolled attack; `tier > 0` marks it a crit. a configured
+     *   tier floor raises only captured crits and can recalculate their payout.
      * @param base the current base damage, added for a non-crit strike.
      * @returns true iff the strike was captured by the pot. callers must use this —
      *   not {@link active} — to decide whether the strike still erupts as world gold:
@@ -279,6 +291,12 @@ export class Surge {
     recordStrike(result: AttackResult, base: number): boolean {
         if (this._phase !== "surging") return false;
         const isCrit = result.tier > 0;
+        if (isCrit && result.tier < this.tierFloor) {
+            const originalTier = result.tier;
+            result.tier = this.tierFloor;
+            result.damage =
+                this.payoutForTier?.(result, originalTier, result.tier) ?? result.damage;
+        }
         this._contributions += isCrit ? result.damage : base;
         if (isCrit) this._crits += 1;
         this.listeners.onPotChange?.(this.pot);
