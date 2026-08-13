@@ -65,28 +65,19 @@ The wave is a `Workflow` script (see `~/.claude/critstorm-wave-4/wave-*.js`). `p
 
 ## Harness: Codex
 
-The Codex harness is [`scripts/run-codex-wave.ts`](./scripts/run-codex-wave.ts), driven by a typed definition under [`waves/`](./waves/). The orchestrator invokes it once, then integrates only when it returns a `ready-to-integrate` manifest.
+Codex orchestration follows the same protocol through native subagents in isolated Git worktrees. There is no repository wave runner or generated wave definition: the orchestrator owns the control flow and integrates only after every task is ready.
 
-The runner provides the control flow that native model-driven subagents do not:
+For each bounded task, the orchestrator:
 
-- Guard is deterministic shell code and aborts before any model runs.
-- Each task gets an isolated Git worktree and its own non-interactive `codex exec` process.
-- The task spec is one string passed unchanged to Implement and Review.
-- Implement and Fix workers only edit files. The runner owns gates, commits, pushes, and PR creation.
-- Review runs read-only. The runner alone posts `gh pr review --comment`, so a reviewer cannot approve or request changes.
-- Fix receives only blocker/major findings and must disposition every claim.
-- Four task pipelines may run concurrently; each advances independently through Implement → Review → optional Fix.
-- Workers run with Codex multi-agent delegation disabled.
-- The runner stops before integration. The Sol orchestrator rebases, resolves collisions, gates, merges, closes beads, and pushes.
+- runs the deterministic Guard before any worker starts and records the base commit;
+- gives Implement and Review the same task spec, including design sections, owned files, collision warnings, and the instruction to keep existing tests green;
+- starts each worker in its own isolated Git worktree and keeps workers from merging, approving, or touching another worker's scope;
+- requires reviewers to remain read-only and post comment-only findings, with no approve or request-changes action;
+- sends confirmed blocker/major findings to Fix, which must disposition every claim before updating the same branch;
+- waits for the human green light before implementation and stops before integration;
+- rebases, gates, resolves declared collisions, merges, closes beads, and pushes only from the orchestrator's main checkout.
 
-Every execution requires an exact green-light argument. Validation is safe and does not start a wave:
-
-```bash
-npm run wave:6a -- --check
-npm run wave:6a -- --green-lit critstorm-wave-6a
-```
-
-The runner writes its integration manifest to `/tmp/<wave-name>-manifest.json`. An `aborted` or `failed` manifest forbids integration. Failed-task worktrees are deliberately retained for diagnosis; successful-task worktrees are removed after their PR pipeline completes.
+Native Codex workers do not invoke or depend on the former Codex wave runner. The invariants above remain mandatory: guard before work, human green light, identical implementation/review spec, declared collisions, workers never merge, reviewers comment only, and orchestrator-only integration.
 
 ## Task specs
 

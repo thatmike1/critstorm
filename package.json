@@ -8,8 +8,7 @@
         "build": "tsc --noEmit && vite build",
         "preview": "vite preview",
         "sim": "tsx sim/run-sim.ts",
-        "test": "vitest run",
-        "wave:6a": "node --import tsx scripts/run-codex-wave.ts waves/wave-6a.ts"
+        "test": "vitest run"
     },
     "dependencies": {
         "pixi.js": "^8.6.6",
