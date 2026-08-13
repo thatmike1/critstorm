@@ -8,7 +8,7 @@ import {
     type AttackResult,
     type EconomyState,
 } from "./economy";
-import type { Surge } from "./surge";
+import type { PotState, Surge, SurgeEndReason } from "./surge";
 import type { StrikeZone, World } from "./world";
 
 /** essence price of the first auto-striker, affordable in the early-mid storm. */
@@ -37,6 +37,24 @@ export const HEAT_PER_STRIKE = 7;
  */
 export const AUTO_STRIKER_HEAT_RATE = 20;
 
+/** minimum crit depth whose voluntary bank earns one overclock stack. */
+export const OVERCLOCK_BANK_CRITS = 6;
+
+/** per-storm overclock stack cap. */
+export const OVERCLOCK_MAX_STACKS = 38;
+
+/** multiplicative cadence growth earned by each overclock stack. */
+export const OVERCLOCK_FACTOR_PER_STACK = 1.02;
+
+/** hard cadence multiplier cap, bounding physical eruption load. */
+export const OVERCLOCK_MAX_FACTOR = 5;
+
+/** fastest effective turret interval, bounding automatic strikes to four per second. */
+export const OVERCLOCK_MIN_INTERVAL_SEC = 0.25;
+
+/** share of one auto strike's idle heat applied to the live surge at full overclock. */
+export const OVERCLOCK_SURGE_HEAT_SHARE = 0.012;
+
 const BASE_INTERVAL_SEC = 3.5;
 const INTERVAL_REDUCTION_SEC = 0.2;
 const MIN_INTERVAL_SEC = 1;
@@ -55,7 +73,12 @@ export interface AutoStrikerState {
     timerSec: number;
     /** placed turret position in grid cells; null until placed (headless runs keep it null). */
     position: StrikeTarget | null;
+    /** ephemeral successful-bank overclock; resets with every fresh storm. */
+    overclockStacks: number;
 }
+
+/** identifies whether a strike came from player input or the routing structure. */
+export type StrikeSource = "manual" | "automatic";
 
 export interface StrikePathCallbacks {
     /** called when this strike crosses the heat threshold into a surge. */
@@ -71,11 +94,12 @@ export function createAutoStrikerState(level = 0): AutoStrikerState {
         level: Math.min(Math.max(migratedLevel, 0), AUTO_STRIKER_MAX_LEVEL),
         timerSec: 0,
         position: null,
+        overclockStacks: 0,
     };
 }
 
-/** return the current interval in seconds, or infinity while the turret is unowned. */
-export function autoStrikerInterval(state: AutoStrikerState): number {
+/** return the purchased level's interval before successful-bank overclock. */
+export function autoStrikerBaseInterval(state: AutoStrikerState): number {
     if (state.level === 0) return Number.POSITIVE_INFINITY;
     return Math.max(
         BASE_INTERVAL_SEC - (state.level - 1) * INTERVAL_REDUCTION_SEC,
@@ -83,15 +107,60 @@ export function autoStrikerInterval(state: AutoStrikerState): number {
     );
 }
 
+/** return the capped successful-bank cadence multiplier. */
+export function autoStrikerOverclockFactor(state: AutoStrikerState): number {
+    return Math.min(
+        Math.pow(OVERCLOCK_FACTOR_PER_STACK, state.overclockStacks),
+        OVERCLOCK_MAX_FACTOR
+    );
+}
+
+/** return the effective interval after successful-bank overclock. */
+export function autoStrikerInterval(state: AutoStrikerState): number {
+    if (state.level === 0) return Number.POSITIVE_INFINITY;
+    return Math.max(
+        autoStrikerBaseInterval(state) / autoStrikerOverclockFactor(state),
+        OVERCLOCK_MIN_INTERVAL_SEC
+    );
+}
+
 /**
  * pre-surge heat one auto strike adds: {@link AUTO_STRIKER_HEAT_RATE} accumulated
- * over the current interval. scaling with cadence keeps the turret's gross heat
- * rate constant across levels, so every owned level out-builds the pre-surge
- * decay and sustained cadence always reaches the surge threshold. 0 while unowned.
+ * over its purchased base interval. this keeps gross heat constant across paid
+ * levels, while earned overclock cadence raises gross heat proportionally — faster
+ * automation gains risk instead of free safety. 0 while unowned.
  */
 export function autoStrikerStrikeHeat(state: AutoStrikerState): number {
     if (state.level === 0) return 0;
-    return AUTO_STRIKER_HEAT_RATE * autoStrikerInterval(state);
+    return AUTO_STRIKER_HEAT_RATE * autoStrikerBaseInterval(state);
+}
+
+/** deterministic core heat an overclocked captured auto strike adds during a surge. */
+export function autoStrikerSurgeHeat(state: AutoStrikerState): number {
+    if (state.level === 0) return 0;
+    const factor = autoStrikerOverclockFactor(state);
+    return (
+        autoStrikerStrikeHeat(state) *
+        OVERCLOCK_SURGE_HEAT_SHARE *
+        (1 - 1 / factor)
+    );
+}
+
+/** settle one surge exit into the owned turret's ephemeral overclock stack. */
+export function settleAutoStrikerOverclock(
+    state: AutoStrikerState,
+    reason: SurgeEndReason,
+    pot: PotState
+): void {
+    if (state.level === 0) return;
+    if (reason === "bank" && pot.crits >= OVERCLOCK_BANK_CRITS) {
+        state.overclockStacks = Math.min(
+            OVERCLOCK_MAX_STACKS,
+            state.overclockStacks + 1
+        );
+    } else if (reason === "bust") {
+        state.overclockStacks = Math.max(0, state.overclockStacks - 1);
+    }
 }
 
 /** return the price of the next purchase or interval upgrade. */
@@ -211,9 +280,9 @@ export function tickAutoStriker(
 ): number {
     if (state.level === 0 || !(dtSec > 0) || !Number.isFinite(dtSec)) return 0;
     state.timerSec += dtSec;
-    const interval = autoStrikerInterval(state);
     let fired = 0;
-    while (state.timerSec >= interval) {
+    while (state.timerSec >= autoStrikerInterval(state)) {
+        const interval = autoStrikerInterval(state);
         state.timerSec -= interval;
         onStrike();
         fired += 1;
@@ -228,7 +297,8 @@ export function tickAutoStriker(
  * here with the strike rng unless `spreadTarget` is false, so the impact point handed
  * to `onStrike` is final and the renderer never rolls gameplay-affecting randomness.
  * `heat` defaults to the manual per-click fill; auto strikes pass
- * {@link autoStrikerStrikeHeat}.
+ * {@link autoStrikerStrikeHeat}. only a captured strike explicitly tagged
+ * `automatic` may add `capturedAutoCoreHeat`.
  */
 export function executeStrike(
     economy: EconomyState,
@@ -237,7 +307,9 @@ export function executeStrike(
     callbacks: StrikePathCallbacks,
     target?: StrikeTarget,
     heat: number = HEAT_PER_STRIKE,
-    spreadTarget: boolean = true
+    spreadTarget: boolean = true,
+    source: StrikeSource = "manual",
+    capturedAutoCoreHeat = 0
 ): AttackResult {
     return executeResolvedStrike(
         economy,
@@ -247,7 +319,9 @@ export function executeStrike(
         rollAttack(economy, rng),
         target,
         heat,
-        spreadTarget
+        spreadTarget,
+        source,
+        capturedAutoCoreHeat
     );
 }
 
@@ -260,12 +334,17 @@ export function executeResolvedStrike(
     result: AttackResult,
     target?: StrikeTarget,
     heat: number = HEAT_PER_STRIKE,
-    spreadTarget: boolean = true
+    spreadTarget: boolean = true,
+    source: StrikeSource = "manual",
+    capturedAutoCoreHeat = 0
 ): AttackResult {
     if (surge.addHeat(heat)) callbacks.onSurgeStart();
     const effective = surge.resolveResult(result);
     applyAttack(economy, effective);
     const captured = surge.recordStrike(effective, baseDamage(economy));
+    if (captured && source === "automatic" && surge.active) {
+        surge.addExternalCoreHeat(capturedAutoCoreHeat);
+    }
     const impact = target && spreadTarget ? applyStrikeSpread(target, effective.tier, rng) : target;
     callbacks.onStrike(effective, captured, impact);
     return effective;

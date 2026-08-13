@@ -7,13 +7,13 @@
  *   npm run sim -- --duration 20 --strategy always-ride --seed 7
  *   npm run sim -- --strategy bank-at-8
  *   npm run sim -- --mode pacing --duration 2 --seed 42
- *   npm run sim -- --mode late-pacing --duration 35 --auto-striker disabled
+ *   npm run sim -- --mode late-pacing --duration 35 --auto-striker enabled --overclock disabled
  *   npm run sim -- --mode economy        # legacy greedy-economy table
  *   npm run sim 20                       # legacy: economy table, 20 minutes
  *
  * flags: --duration <minutes> --strategy <never-ride|always-ride|bank-at-n>
  *        --seed <int> --mode <storm|pacing|late-pacing|economy>
- *        --auto-striker <enabled|disabled>
+ *        --auto-striker <enabled|disabled> --overclock <enabled|disabled>
  */
 import { buy, createState, critChance, critMulti, expectedDps, tick } from "../src/game/economy";
 import { formatNumber } from "../src/game/format";
@@ -33,6 +33,7 @@ interface CliArgs {
     strategy: string;
     seed: number;
     allowAutoStriker: boolean;
+    allowAutoStrikerOverclock: boolean;
 }
 
 /** parse argv into typed options, preserving the legacy `sim <minutes>` form */
@@ -43,6 +44,7 @@ function parseArgs(argv: string[]): CliArgs {
         strategy: "bank-at-6",
         seed: 42,
         allowAutoStriker: true,
+        allowAutoStrikerOverclock: true,
     };
 
     // legacy positional: a single bare number means "economy table, N minutes".
@@ -88,6 +90,13 @@ function parseArgs(argv: string[]): CliArgs {
                 args.allowAutoStriker = value === "enabled";
                 i++;
                 break;
+            case "--overclock":
+                if (value !== "enabled" && value !== "disabled") {
+                    throw new Error(`--overclock must be enabled|disabled, got ${value}`);
+                }
+                args.allowAutoStrikerOverclock = value === "enabled";
+                i++;
+                break;
             case "--seed": {
                 const seed = Number(value);
                 if (!Number.isFinite(seed)) {
@@ -123,7 +132,10 @@ function printPacing(summary: StormBotSummary): void {
     );
     console.log(`surges         : ${summary.banks} banked / ${summary.busts} busted`);
     console.log(
-        `auto-striker    : level ${summary.autoStrikerLevel}, ${summary.automaticAttacks} strikes, ${formatNumber(summary.autoStrikerEssenceSpent)} essence spent`
+        `auto-striker    : level ${summary.autoStrikerLevel}, OC ${summary.autoStrikerOverclockStacks}, ${summary.automaticAttacks} strikes, ${formatNumber(summary.autoStrikerEssenceSpent)} essence spent`
+    );
+    console.log(
+        `overclock      : ${summary.autoStrikerOverclockEnabled ? "enabled" : "disabled"}, ${summary.autoStrikerOverclockBankGains} gained / ${summary.autoStrikerOverclockBustLosses} lost, ${summary.autoStrikerSurgeHeatAdded.toFixed(1)} surge heat`
     );
     console.log(
         `stone stroke    : ${summary.brushCellsPainted} cells / ${summary.brushEssenceSpent} essence`
@@ -137,11 +149,11 @@ function printPacing(summary: StormBotSummary): void {
     );
     console.log(`blow-up cores  : ${summary.blowUpCores}`);
     if (summary.samples.length > 0) {
-        console.log("\nmin | cumulative essence | cores/min | auto level");
-        console.log("----|--------------------|-----------|-----------");
+        console.log("\nmin | cumulative essence | cores/min | auto level | OC");
+        console.log("----|--------------------|-----------|------------|---");
         for (const sample of summary.samples) {
             console.log(
-                `${String(sample.minute).padStart(3)} | ${formatNumber(sample.cumulativeEssence).padStart(18)} | ${sample.coresPerMin.toFixed(3).padStart(9)} | ${String(sample.autoStrikerLevel).padStart(10)}`
+                `${String(sample.minute).padStart(3)} | ${formatNumber(sample.cumulativeEssence).padStart(18)} | ${sample.coresPerMin.toFixed(3).padStart(9)} | ${String(sample.autoStrikerLevel).padStart(10)} | ${String(sample.autoStrikerOverclockStacks).padStart(2)}`
             );
         }
     }
@@ -234,7 +246,10 @@ function main(): void {
         printPacing(
             runStormBot({
                 durationSec: args.durationMin * 60,
-                profile: competentPacingProfile(args.allowAutoStriker),
+                profile: competentPacingProfile(
+                    args.allowAutoStriker,
+                    args.allowAutoStrikerOverclock
+                ),
                 strategy: strategyByName(args.strategy),
                 seed: args.seed,
                 sampleAtMinutes: LATE_PACING_SAMPLE_MINUTES.filter(

@@ -346,6 +346,31 @@ describe("Surge core heat (design §3/§6)", () => {
         expect(s.coreLoad).toBeCloseTo(75 / 200, 6);
     });
 
+    it("accepts finite positive external heat only while surging", () => {
+        const s = new Surge({}, { criticalTemp: 100 });
+        s.addExternalCoreHeat(10);
+        expect(s.coreTemp).toBe(0);
+        s.addHeat(100);
+        s.addExternalCoreHeat(Number.NaN);
+        s.addExternalCoreHeat(-1);
+        expect(s.coreTemp).toBe(0);
+        s.addExternalCoreHeat(25);
+        expect(s.coreTemp).toBe(25);
+    });
+
+    it("busts through the same exit seam on external heat", () => {
+        const ends: SurgeEndReason[] = [];
+        const s = new Surge(
+            { onEnd: (reason) => ends.push(reason) },
+            { criticalTemp: 20 }
+        );
+        s.addHeat(100);
+        s.recordStrike(normal(0), 5);
+        s.addExternalCoreHeat(20);
+        expect(ends).toEqual(["bust"]);
+        expect(s.active).toBe(false);
+    });
+
     it("busts through the exit seam when a crit spike crosses critical temp", () => {
         const ends: { reason: SurgeEndReason; pot: PotState }[] = [];
         // a low ceiling so a single tier-1 spike overheats deterministically.

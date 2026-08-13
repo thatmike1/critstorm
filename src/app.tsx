@@ -52,9 +52,12 @@ import {
 import {
     AUTO_STRIKER_MAX_LEVEL,
     HEAT_PER_STRIKE,
+    OVERCLOCK_BANK_CRITS,
+    OVERCLOCK_MAX_STACKS,
     autoStrikerAim,
     autoStrikerInterval,
     autoStrikerStrikeHeat,
+    autoStrikerSurgeHeat,
     autoStrikerUpgradeCost,
     canUpgradeAutoStriker,
     createAutoStrikerState,
@@ -62,9 +65,11 @@ import {
     executeResolvedStrike,
     executeStrike,
     placeAutoStriker,
+    settleAutoStrikerOverclock,
     tickAutoStriker,
     upgradeAutoStriker,
     type AutoStrikerState,
+    type StrikeSource,
     type StrikeTarget,
 } from "./game/auto-striker";
 import {
@@ -111,6 +116,8 @@ interface HudState {
     autoStrikerInterval: number;
     autoStrikerCost: number;
     autoStrikerAffordable: boolean;
+    autoStrikerOverclockStacks: number;
+    autoStrikerSurgeHeat: number;
 }
 
 interface InitialGameState {
@@ -141,6 +148,8 @@ function snapshot(s: EconomyState, autoStriker: AutoStrikerState): HudState {
         autoStrikerInterval: interval,
         autoStrikerCost: autoStrikerUpgradeCost(autoStriker),
         autoStrikerAffordable: canUpgradeAutoStriker(s, autoStriker),
+        autoStrikerOverclockStacks: autoStriker.overclockStacks,
+        autoStrikerSurgeHeat: autoStrikerSurgeHeat(autoStriker),
     };
 }
 
@@ -196,6 +205,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         new Surge(
             {
                 onEnd: (reason, pot) => {
+                    settleAutoStrikerOverclock(autoStrikerRef.current, reason, pot);
                     if (reason !== "bust") return;
                     engineRef.current?.bust(pot);
                     // INTERIM blow-up condition (npq.2): an overheat bust while the world
@@ -285,6 +295,8 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         onStrike: (result: AttackResult, captured: boolean, strikeTarget?: StrikeTarget) => {
             engineRef.current?.spawn(result.damage, result.tier, result.golden);
             if (!captured) {
+                // forge wiring (design §5): eruption-value nodes fatten the
+                // gold a strike erupts into the world, at the source seam.
                 engineRef.current?.erupt(
                     result.damage * effects.eruptionValueMultiplier,
                     result.tier,
@@ -296,8 +308,23 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         },
     };
 
-    const runStrike = (target?: StrikeTarget, heat?: number): void => {
-        executeStrike(stateRef.current, surgeRef.current, Math.random, strikeCallbacks, target, heat);
+    const runStrike = (
+        target?: StrikeTarget,
+        heat?: number,
+        source: StrikeSource = "manual",
+        capturedAutoCoreHeat = 0
+    ): void => {
+        executeStrike(
+            stateRef.current,
+            surgeRef.current,
+            Math.random,
+            strikeCallbacks,
+            target,
+            heat,
+            true,
+            source,
+            capturedAutoCoreHeat
+        );
     };
 
     /** trigger one non-golden max-tier strike at the placed rod through the shared path. */
@@ -376,7 +403,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                     // point (seedable rng seam) and the cadence-scaled heat fill.
                     runStrike(
                         autoStrikerAim(engine!.storm.strikeZone, Math.random),
-                        autoStrikerStrikeHeat(autoStrikerRef.current)
+                        autoStrikerStrikeHeat(autoStrikerRef.current),
+                        "automatic",
+                        autoStrikerSurgeHeat(autoStrikerRef.current)
                     );
                 });
                 // the front's reward knob applies at the mint (design §4.5): the bog's
@@ -889,10 +918,17 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                             onClick={buyAutoStrikerUpgrade}
                         >
                             <span className="upgrade-name">
-                                Auto-Striker <em>lv{hud.autoStrikerLevel}</em>
+                                Auto-Striker <em>lv{hud.autoStrikerLevel}</em>{" "}
+                                <em>
+                                    OC {hud.autoStrikerOverclockStacks}/{OVERCLOCK_MAX_STACKS}
+                                </em>
                             </span>
                             <span className="upgrade-desc">
-                                fires every {hud.autoStrikerInterval.toFixed(1)}s
+                                fires every {hud.autoStrikerInterval.toFixed(2)}s · +
+                                {hud.autoStrikerSurgeHeat.toFixed(1)} core heat in surge
+                            </span>
+                            <span className="upgrade-desc">
+                                bank at {OVERCLOCK_BANK_CRITS} crits to charge · bust drains 1
                             </span>
                             <span className="upgrade-cost">
                                 {hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL

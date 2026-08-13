@@ -9,14 +9,24 @@ import {
     AUTO_STRIKER_HEAT_RATE,
     AUTO_STRIKER_PURCHASE_COST,
     autoStrikerAim,
+    autoStrikerBaseInterval,
     autoStrikerInterval,
+    autoStrikerOverclockFactor,
     autoStrikerStrikeHeat,
+    autoStrikerSurgeHeat,
     autoStrikerUpgradeCost,
     createAutoStrikerState,
     defaultAutoStrikerPosition,
     executeStrike,
     executeResolvedStrike,
+    OVERCLOCK_BANK_CRITS,
+    OVERCLOCK_FACTOR_PER_STACK,
+    OVERCLOCK_MAX_FACTOR,
+    OVERCLOCK_MAX_STACKS,
+    OVERCLOCK_MIN_INTERVAL_SEC,
+    OVERCLOCK_SURGE_HEAT_SHARE,
     placeAutoStriker,
+    settleAutoStrikerOverclock,
     tickAutoStriker,
     upgradeAutoStriker,
     type StrikeTarget,
@@ -86,6 +96,76 @@ describe("auto-striker timer", () => {
         const fire = vi.fn();
         expect(tickAutoStriker(createAutoStrikerState(), 100, fire)).toBe(0);
         expect(fire).not.toHaveBeenCalled();
+    });
+
+    it("recomputes cadence after a strike callback changes overclock", () => {
+        const striker = createAutoStrikerState(1);
+        let fired = 0;
+        const overclockedInterval = 3.5 / Math.pow(OVERCLOCK_FACTOR_PER_STACK, OVERCLOCK_MAX_STACKS);
+
+        expect(
+            tickAutoStriker(striker, 3.5 + overclockedInterval * 2 + 0.01, () => {
+                fired += 1;
+                if (fired === 1) striker.overclockStacks = OVERCLOCK_MAX_STACKS;
+            })
+        ).toBe(3);
+        expect(striker.timerSec).toBeCloseTo(0.01, 10);
+    });
+});
+
+describe("successful-bank overclock", () => {
+    const pot = (crits: number) => ({ contributions: 1, crits, multiplier: 1, value: 1 });
+
+    it("adds one stack for an eligible owned bank and caps at the configured maximum", () => {
+        const striker = createAutoStrikerState(1);
+        settleAutoStrikerOverclock(striker, "bank", pot(OVERCLOCK_BANK_CRITS));
+        expect(striker.overclockStacks).toBe(1);
+        striker.overclockStacks = OVERCLOCK_MAX_STACKS;
+        settleAutoStrikerOverclock(striker, "bank", pot(OVERCLOCK_BANK_CRITS + 3));
+        expect(striker.overclockStacks).toBe(OVERCLOCK_MAX_STACKS);
+    });
+
+    it("ignores shallow and unowned banks", () => {
+        const owned = createAutoStrikerState(1);
+        settleAutoStrikerOverclock(owned, "bank", pot(OVERCLOCK_BANK_CRITS - 1));
+        expect(owned.overclockStacks).toBe(0);
+
+        const unowned = createAutoStrikerState();
+        settleAutoStrikerOverclock(unowned, "bank", pot(OVERCLOCK_BANK_CRITS));
+        expect(unowned.overclockStacks).toBe(0);
+    });
+
+    it("removes one stack on bust and floors at zero", () => {
+        const striker = createAutoStrikerState(1);
+        striker.overclockStacks = 2;
+        settleAutoStrikerOverclock(striker, "bust", pot(1));
+        expect(striker.overclockStacks).toBe(1);
+        settleAutoStrikerOverclock(striker, "bust", pot(1));
+        settleAutoStrikerOverclock(striker, "bust", pot(1));
+        expect(striker.overclockStacks).toBe(0);
+    });
+
+    it("scales cadence by the exact capped formula and resets with fresh state", () => {
+        const striker = createAutoStrikerState(12);
+        expect(autoStrikerBaseInterval(striker)).toBeCloseTo(1.3, 10);
+        striker.overclockStacks = 1;
+        expect(autoStrikerOverclockFactor(striker)).toBe(OVERCLOCK_FACTOR_PER_STACK);
+        expect(autoStrikerInterval(striker)).toBeCloseTo(
+            1.3 / OVERCLOCK_FACTOR_PER_STACK,
+            10
+        );
+        striker.overclockStacks = OVERCLOCK_MAX_STACKS;
+        expect(autoStrikerOverclockFactor(striker)).toBeCloseTo(
+            Math.min(
+                Math.pow(OVERCLOCK_FACTOR_PER_STACK, OVERCLOCK_MAX_STACKS),
+                OVERCLOCK_MAX_FACTOR
+            ),
+            10
+        );
+        expect(autoStrikerInterval(striker)).toBeGreaterThanOrEqual(
+            OVERCLOCK_MIN_INTERVAL_SEC
+        );
+        expect(createAutoStrikerState(12).overclockStacks).toBe(0);
     });
 });
 
@@ -230,15 +310,33 @@ describe("auto-striker heat cadence", () => {
         expect(autoStrikerStrikeHeat(createAutoStrikerState())).toBe(0);
         const base = createAutoStrikerState(1);
         expect(autoStrikerStrikeHeat(base)).toBeCloseTo(
-            AUTO_STRIKER_HEAT_RATE * autoStrikerInterval(base)
+            AUTO_STRIKER_HEAT_RATE * autoStrikerBaseInterval(base)
         );
         const max = createAutoStrikerState(12);
         expect(autoStrikerStrikeHeat(max)).toBeCloseTo(
-            AUTO_STRIKER_HEAT_RATE * autoStrikerInterval(max)
+            AUTO_STRIKER_HEAT_RATE * autoStrikerBaseInterval(max)
         );
         // the break-even property behind the ignition guarantee: the turret's gross
         // heat rate beats the pre-surge drain at every owned level.
         expect(AUTO_STRIKER_HEAT_RATE).toBeGreaterThan(HEAT_DECAY_PER_SEC);
+    });
+
+    it("raises gross pre-surge heat rate and adds deterministic captured heat", () => {
+        const striker = createAutoStrikerState(12);
+        const baseHeat = autoStrikerStrikeHeat(striker);
+        expect(autoStrikerSurgeHeat(striker)).toBe(0);
+        striker.overclockStacks = OVERCLOCK_MAX_STACKS;
+
+        expect(autoStrikerStrikeHeat(striker)).toBe(baseHeat);
+        expect(baseHeat / autoStrikerInterval(striker)).toBeCloseTo(
+            AUTO_STRIKER_HEAT_RATE * autoStrikerOverclockFactor(striker),
+            10
+        );
+        const factor = autoStrikerOverclockFactor(striker);
+        expect(autoStrikerSurgeHeat(striker)).toBeCloseTo(
+            baseHeat * OVERCLOCK_SURGE_HEAT_SHARE * (1 - 1 / factor),
+            10
+        );
     });
 
     it("ignites a surge from zero heat on sustained level-1 cadence against pre-surge decay", () => {
@@ -279,6 +377,59 @@ describe("auto-striker heat cadence", () => {
             onStrike: () => undefined,
         });
         expect(surge.heat).toBe(7);
+    });
+
+    it("adds extra core heat only to captured automatic strikes", () => {
+        const economy = createState();
+        const surge = new Surge({}, { criticalTemp: 200 });
+        surge.addHeat(100);
+
+        executeStrike(
+            economy,
+            surge,
+            () => 1,
+            { onSurgeStart: vi.fn(), onStrike: vi.fn() },
+            undefined,
+            0,
+            true,
+            "manual",
+            12
+        );
+        expect(surge.coreTemp).toBe(0);
+        executeStrike(
+            economy,
+            surge,
+            () => 1,
+            { onSurgeStart: vi.fn(), onStrike: vi.fn() },
+            undefined,
+            0,
+            true,
+            "automatic",
+            12
+        );
+        expect(surge.coreTemp).toBe(12);
+    });
+
+    it("does not double-heat after the ordinary crit spike already busts", () => {
+        const economy = createState();
+        const surge = new Surge({}, { rng: () => 1, criticalTemp: 50 });
+        const externalHeat = vi.spyOn(surge, "addExternalCoreHeat");
+        surge.addHeat(100);
+
+        executeStrike(
+            economy,
+            surge,
+            () => 0,
+            { onSurgeStart: vi.fn(), onStrike: vi.fn() },
+            undefined,
+            0,
+            true,
+            "automatic",
+            999
+        );
+
+        expect(surge.active).toBe(false);
+        expect(externalHeat).not.toHaveBeenCalled();
     });
 });
 

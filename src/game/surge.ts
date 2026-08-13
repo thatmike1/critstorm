@@ -336,6 +336,12 @@ export class Surge {
         this.addCoreHeat(this.ambientCoeff * this._crits * this._crits * dtSec);
     }
 
+    /** add deterministic external heat while a surge is live. */
+    addExternalCoreHeat(delta: number): void {
+        if (this._phase !== "surging" || !(delta > 0) || !Number.isFinite(delta)) return;
+        this.addCoreHeat(delta);
+    }
+
     /**
      * exit seam (design §3). the two real exits — the BANK eruption (hkm.3) and the
      * overheat bust (hkm.4) — own their spectacle payloads elsewhere; this is the
