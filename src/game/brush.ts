@@ -22,9 +22,10 @@ export interface BrushDef {
  * defense brushes purchasable with essence and painted with the mouse like the
  * powder-lab brushes (design §4.2). costs are flat per cell (not leveled) and sit
  * in the same affordability regime as the crit upgrades (design §6 cost band),
- * rebased so a first stone stroke — a disc of ~28 cells at 1 essence each — is a
+ * rebased so a first stone stroke — a 29-cell disc at 6 essence each — is a
  * deliberate purchase reachable around the ~90 s first-surge gate (design §8),
- * not an instant freebie. water quenches molten gold and costs more per cell.
+ * not an instant freebie. water stays strictly more expensive because its stronger
+ * quench is the next defense tier; only stone's §8 affordability is tuned here.
  */
 export const BRUSHES: BrushDef[] = [
     {
@@ -32,7 +33,7 @@ export const BRUSHES: BrushDef[] = [
         name: "Stone",
         desc: "cheap baffles — channels gold flows",
         mat: Mat.STONE,
-        costPerCell: 1,
+        costPerCell: 6,
         radius: 3,
     },
     {
@@ -40,7 +41,7 @@ export const BRUSHES: BrushDef[] = [
         name: "Water",
         desc: "quenches molten gold fast",
         mat: Mat.WATER,
-        costPerCell: 3,
+        costPerCell: 7,
         radius: 3,
     },
 ];
@@ -55,6 +56,24 @@ export function brushById(id: BrushId): BrushDef {
 /** true when the player can afford at least one cell of `brush`. */
 export function canPaint(state: EconomyState, brush: BrushDef): boolean {
     return state.essence >= brush.costPerCell;
+}
+
+/** count the cells in one unobstructed filled-disc stroke. */
+export function fullStrokeCellCount(brush: BrushDef): number {
+    const r = brush.radius;
+    const r2 = r * r;
+    let cells = 0;
+    for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+            if (dx * dx + dy * dy <= r2) cells += 1;
+        }
+    }
+    return cells;
+}
+
+/** return the essence price of one unobstructed full stroke. */
+export function fullStrokeCost(brush: BrushDef): number {
+    return fullStrokeCellCount(brush) * brush.costPerCell;
 }
 
 /**
