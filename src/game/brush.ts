@@ -53,9 +53,9 @@ export function brushById(id: BrushId): BrushDef {
     return def;
 }
 
-/** true when the player can afford at least one cell of `brush`. */
-export function canPaint(state: EconomyState, brush: BrushDef): boolean {
-    return state.essence >= brush.costPerCell;
+/** true when the player can afford at least one cell at the supplied effective cost. */
+export function canPaint(state: EconomyState, costPerCell: number): boolean {
+    return costPerCell > 0 && state.essence >= costPerCell;
 }
 
 /** count the cells in one unobstructed filled-disc stroke. */
@@ -92,7 +92,7 @@ function paintable(sim: Simulation, x: number, y: number, mat: number): boolean 
 
 /**
  * paint a filled disc of `brush` centred on grid cell (cx,cy), charging
- * `brush.costPerCell` in essence for each cell actually painted. per-cell pricing
+ * `costPerCell` in essence for each cell actually painted. per-cell pricing
  * (design §4.2): every painted cell is deducted from essence, and painting stops
  * as soon as the next cell can't be afforded — you can't paint what you can't pay
  * for. value is never destroyed: gold/molten-gold and wall cells are skipped (and
@@ -103,9 +103,11 @@ export function paintBrush(
     sim: Simulation,
     state: EconomyState,
     brush: BrushDef,
+    costPerCell: number,
     cx: number,
     cy: number
 ): number {
+    if (!(costPerCell > 0) || !Number.isFinite(costPerCell)) return 0;
     const r = brush.radius;
     const r2 = r * r;
     let painted = 0;
@@ -118,8 +120,8 @@ export function paintBrush(
             if (!paintable(sim, x, y, brush.mat)) continue;
             // can't paint what you can't afford: once a single cell is out of
             // reach, the whole rest of the stroke is too (flat per-cell cost).
-            if (state.essence < brush.costPerCell) return painted;
-            state.essence -= brush.costPerCell;
+            if (state.essence < costPerCell) return painted;
+            state.essence -= costPerCell;
             // r=0 paints exactly one vetted cell; matches the eruption spawner's
             // single-cell paint so we reuse the sim's public paint API rather than
             // repainting the whole disc (which would overwrite the value cells we

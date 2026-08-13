@@ -1,4 +1,4 @@
-import type { BrushId } from "./brush";
+import type { BrushDef, BrushId } from "./brush";
 import { COLLECTOR_BASE_FEE, type EconomyState, type UpgradeId } from "./economy";
 import type { StormEventType } from "./storm-events";
 import { AMBIENT_HEAT_COEFF, CORE_CRITICAL_TEMP } from "./surge";
@@ -33,7 +33,7 @@ export type WorkshopEffect =
     | { kind: "collector-fee"; reduction: number }
     | { kind: "collector-count"; amount: number }
     | { kind: "starting-essence"; amount: number }
-    | { kind: "starting-brush"; brush: BrushId }
+    | { kind: "brush-cost-multiplier"; brush: BrushId; multiplier: number }
     | { kind: "heat-resistance"; multiplier: number }
     | { kind: "critical-temp"; bonus: number }
     | { kind: "unlock-front"; front: number }
@@ -234,8 +234,8 @@ const AEGIS_NODES: readonly WorkshopNodeDef[] = [
     },
     {
         name: "Mason's Kit",
-        desc: "stone brush ready from storm start",
-        effect: { kind: "starting-brush", brush: "stone" },
+        desc: "stone brush costs 20% less",
+        effect: { kind: "brush-cost-multiplier", brush: "stone", multiplier: 0.8 },
     },
     {
         name: "Ceramic Liner",
@@ -254,8 +254,8 @@ const AEGIS_NODES: readonly WorkshopNodeDef[] = [
     },
     {
         name: "Diviner's Kit",
-        desc: "water brush ready from storm start",
-        effect: { kind: "starting-brush", brush: "water" },
+        desc: "water brush costs 20% less",
+        effect: { kind: "brush-cost-multiplier", brush: "water", multiplier: 0.8 },
     },
     {
         name: "Coolant Loop",
@@ -512,9 +512,8 @@ export interface WorkshopEffects {
     /** Vault: essence granted at storm start. granted spendable-only — it was not
      * collected this storm, so it never counts toward core conversion (design §5). */
     startingEssence: number;
-    /** Aegis: brushes pre-unlocked at storm start. CONSUMED LATER — brushes are
-     * essence-gated (not unlock-gated) today; this feeds the future unlock gate. */
-    startingBrushes: readonly BrushId[];
+    /** Aegis: permanent multipliers on each defense brush's per-cell essence cost. */
+    brushCostMultipliers: Record<BrushId, number>;
     /** Aegis: multiplier on the surge ambient heat coefficient (<1 resists heat). */
     ambientHeatMultiplier: number;
     /** Aegis: degrees added to the surge core critical temperature. */
@@ -538,7 +537,7 @@ export function baselineEffects(): WorkshopEffects {
         collectorFeeReduction: 0,
         extraCollectors: 0,
         startingEssence: 0,
-        startingBrushes: [],
+        brushCostMultipliers: { stone: 1, water: 1 },
         ambientHeatMultiplier: 1,
         criticalTempBonus: 0,
         unlockedFronts: 1,
@@ -550,7 +549,6 @@ export function baselineEffects(): WorkshopEffects {
 /** fold every purchased node's effect into one aggregate a storm can consume. */
 export function workshopEffects(state: WorkshopState): WorkshopEffects {
     const fx = baselineEffects();
-    const brushes: BrushId[] = [];
     const modifiers: StormEventModifier[] = [];
     for (const track of WORKSHOP_TRACKS) {
         const owned = Math.min(state.purchased[track.id], track.nodes.length);
@@ -572,8 +570,8 @@ export function workshopEffects(state: WorkshopState): WorkshopEffects {
                 case "starting-essence":
                     fx.startingEssence += effect.amount;
                     break;
-                case "starting-brush":
-                    brushes.push(effect.brush);
+                case "brush-cost-multiplier":
+                    fx.brushCostMultipliers[effect.brush] *= effect.multiplier;
                     break;
                 case "heat-resistance":
                     fx.ambientHeatMultiplier *= effect.multiplier;
@@ -593,7 +591,6 @@ export function workshopEffects(state: WorkshopState): WorkshopEffects {
             }
         }
     }
-    fx.startingBrushes = brushes;
     fx.eventModifiers = modifiers;
     return fx;
 }
@@ -611,6 +608,12 @@ export function criticalTempWith(fx: WorkshopEffects): number {
 /** the surge ambient heat coefficient a fresh storm opens with (Aegis lowers it). */
 export function ambientCoeffWith(fx: WorkshopEffects): number {
     return AMBIENT_HEAT_COEFF * fx.ambientHeatMultiplier;
+}
+
+/** return a defense brush's effective per-cell cost after permanent Aegis discounts. */
+export function brushCostWith(fx: WorkshopEffects, brush: BrushDef): number {
+    const cost = brush.costPerCell * fx.brushCostMultipliers[brush.id];
+    return cost > 0 && Number.isFinite(cost) ? cost : Number.EPSILON;
 }
 
 /**
