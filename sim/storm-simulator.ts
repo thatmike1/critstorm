@@ -8,8 +8,9 @@
  * composition per frame: advance the economy (rolling attacks), spend essence
  * with a greedy dps policy, fire a physical strike into the sim for notable
  * crits, step the sim one frame, then let the strategy decide bank-or-ride. the
- * this remains the fast long-arc economic model. the §8 click/surge/brush pacing
- * path lives in storm-bot.ts and drives the real gameplay state machines.
+ * this remains a fast diagnostic economic model. authoritative §8 and late-arc
+ * pacing live in storm-bot.ts, which drives clicks, surges, collection delay,
+ * brush spending, and the placed auto-striker through production seams.
  */
 import {
     applyAttack,
@@ -168,7 +169,7 @@ function buyProgressionUpgrade(economy: EconomyState, autoStriker: AutoStrikerSt
  * advance one frame of the pure in-storm economy: roll one-click-per-second manual
  * attacks plus the purchased auto-striker, credit their collected essence, then buy
  * one progression upgrade. the physical sim never touches essence, so the §6
- * anti-farming trajectory ({@link cumulativeEssenceAtMinutes}) runs this alone.
+ * synthetic trajectory ({@link cumulativeEssenceAtMinutes}) runs this alone.
  */
 export function stepEconomy(
     economy: EconomyState,
@@ -193,10 +194,10 @@ export function stepEconomy(
 /**
  * the cumulative-essence trajectory of a storm's economy for a seed, sampled at the
  * requested minute marks (design §5 `bankedEssence`). this is the sim-free economic
- * core the §6 anti-farming assertion reads: it reproduces exactly the economy stream
- * of a full {@link StormSimulator} run (same seed → same `mulberry32` roll stream),
- * minus the physical sim that does not affect essence, so many long storms can be
- * swept cheaply.
+ * core used for cheap diagnostics: it reproduces exactly the economy stream of a
+ * full {@link StormSimulator} run (same seed → same `mulberry32` roll stream), minus
+ * the physical sim. it is not the authoritative late-pacing gate because it omits
+ * live surges, delayed post-fee collection, brush input, and placed automation.
  * @param seed the economy seed; matches {@link StormSimulator}'s economy stream.
  * @param minutes the minute marks to record cumulative essence at (any order).
  * @param stepSec fixed timestep; defaults to {@link DEFAULT_STEP_SEC}.

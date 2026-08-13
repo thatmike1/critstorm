@@ -110,10 +110,19 @@ describe("shared strike path", () => {
         executeStrike(economy, surge, () => 1, callbacks, manualTarget);
         const striker = createAutoStrikerState(1);
         striker.timerSec = autoStrikerInterval(striker);
-        tickAutoStriker(striker, 0.01, () => executeStrike(economy, surge, () => 1, callbacks));
+        tickAutoStriker(striker, 0.01, () =>
+            executeStrike(
+                economy,
+                surge,
+                () => 1,
+                callbacks,
+                undefined,
+                autoStrikerStrikeHeat(striker)
+            )
+        );
 
         expect(economy.totalDamage).toBe(2);
-        expect(surge.heat).toBe(14);
+        expect(surge.heat).toBe(7 + AUTO_STRIKER_HEAT_RATE * autoStrikerInterval(striker));
         // the manual aim gets the tier-0 spread applied game-side: rng()=1 shifts
         // the impact by +1 cell on each axis; the timer strike had no target.
         expect(targets).toEqual([{ x: 21, y: 31 }, undefined]);
@@ -130,7 +139,14 @@ describe("shared strike path", () => {
         striker.timerSec = autoStrikerInterval(striker);
 
         tickAutoStriker(striker, 0.01, () =>
-            executeStrike(economy, surge, () => 1, { onSurgeStart, onStrike })
+            executeStrike(
+                economy,
+                surge,
+                () => 1,
+                { onSurgeStart, onStrike },
+                undefined,
+                autoStrikerStrikeHeat(striker)
+            )
         );
 
         expect(onSurgeStart).toHaveBeenCalledOnce();

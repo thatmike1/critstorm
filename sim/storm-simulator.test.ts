@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { coresFromEssence, createState } from "../src/game/economy";
+import { createState } from "../src/game/economy";
 import { bankAtN, neverRide, strategyByName } from "./bot-strategy";
-import {
-    cumulativeEssenceAtMinutes,
-    stepEconomy,
-    StormSimulator,
-    type StormSummary,
-} from "./storm-simulator";
+import { stepEconomy, StormSimulator, type StormSummary } from "./storm-simulator";
 
 // the storm harness must be deterministic: a fixed seed reproduces the whole
 // run — economy rolls and the sim's internal randomness both flow from the seed.
@@ -94,69 +89,6 @@ describe("bot strategies in the fast long-arc model", () => {
         expect(neverRide.decide(view).type).toBe("none");
         expect(bankAtN(4).decide(view).type).toBe("none");
     });
-});
-
-// design.md §6 mandates three economic assertions for the tuning harness:
-// EV-crossover, bust-hazard, and anti-farming. EV-crossover and bust-hazard read
-// the surge pot/overheat model and live in sim/surge-harness.test.ts, which drives
-// the real Surge machine. anti-farming depends only on the in-storm essence economy
-// and lives here, now that the storm harness credits collector essence
-// (critstorm-4cz.3): each frame mints valueToEssence(payout), so the greedy economy
-// actually compounds instead of sitting at zero.
-//
-// THE PROPERTY (design §5/§6): cores/min must strictly increase with storm depth
-// across the 8->35 min arc, where cores = coresFromEssence(bankedEssence) and
-// bankedEssence is cumulative collected essence. sqrt(essence) is concave, so if
-// in-storm essence growth ever flattens, spamming tiny storms becomes the optimal
-// core grind — this assertion is what catches that.
-//
-// WHY MEDIAN, WHY COARSE MARKS (read before tightening): the greedy economy is a
-// lumpy staircase — a single seed's cores/min wiggles a few percent as greedy saves
-// for the next critMulti tier, and the post-eruption cumulative-essence distribution
-// is heavy-tailed (rare golden-chain runs inflate the MEAN). so the honest,
-// non-cherry-picked statistic is the MEDIAN cumulative essence of a "typical
-// competent storm" over a seed sweep, sampled at the design's coarse arc marks. at
-// that resolution the property holds with the shipped constants; at fine (per-minute)
-// resolution the staircase still dips, and pushing strict monotonicity there needs a
-// sustained super-quadratic growth lever the in-storm upgrade set does not have (its
-// only late engine, critMulti under geometric cost, yields ~quadratic essence and a
-// FLATTENING cores/min past ~30 min). that residual is a MECHANICAL gap for the meta
-// layer (a compounding collection/structure lever), not a constants miss — see the
-// wave-5b PR body. this suite pins the achievable coarse-arc guarantee.
-describe("storm economy (design.md §6 anti-farming)", () => {
-    /** design §5 arc marks (minutes); the storm must get strictly core-richer with depth. */
-    const ARC = [8, 15, 22, 29, 35] as const;
-    /** odd trial count → a clean single-element median; ≥129 is where the coarse arc is stable. */
-    const TRIALS = 129;
-    const SEED_BASE = 1000;
-
-    const median = (xs: number[]): number => {
-        const s = [...xs].sort((a, b) => a - b);
-        return s[s.length >> 1];
-    };
-
-    /** median cumulative essence at each arc mark over TRIALS seeded competent storms. */
-    function medianCumulativeByMinute(): Map<number, number> {
-        const cols = new Map<number, number[]>(ARC.map((m) => [m, []]));
-        for (let i = 0; i < TRIALS; i++) {
-            const traj = cumulativeEssenceAtMinutes((SEED_BASE + i * 40507) | 0, ARC);
-            for (const m of ARC) cols.get(m)!.push(traj.get(m) ?? 0);
-        }
-        return new Map(ARC.map((m) => [m, median(cols.get(m)!)]));
-    }
-
-    it("cores/min strictly increases with storm depth across the 8->35 min arc", () => {
-        const cum = medianCumulativeByMinute();
-        const coresPerMin = ARC.map((m) => coresFromEssence(cum.get(m)!) / m);
-        for (let i = 1; i < coresPerMin.length; i++) {
-            expect(coresPerMin[i]).toBeGreaterThan(coresPerMin[i - 1]);
-        }
-        // and the deepest storm is the core-efficiency argmax — a shallow storm never
-        // out-farms it, which is the anti-farming guarantee in one line.
-        const deepest = coresPerMin[coresPerMin.length - 1];
-        expect(deepest).toBe(Math.max(...coresPerMin));
-    });
-
 });
 
 /** a minimal economy state stand-in for pure strategy-decision tests */

@@ -7,29 +7,43 @@
  *   npm run sim -- --duration 20 --strategy always-ride --seed 7
  *   npm run sim -- --strategy bank-at-8
  *   npm run sim -- --mode pacing --duration 2 --seed 42
+ *   npm run sim -- --mode late-pacing --duration 35 --auto-striker disabled
  *   npm run sim -- --mode economy        # legacy greedy-economy table
  *   npm run sim 20                       # legacy: economy table, 20 minutes
  *
  * flags: --duration <minutes> --strategy <never-ride|always-ride|bank-at-n>
- *        --seed <int> --mode <storm|pacing|economy>
+ *        --seed <int> --mode <storm|pacing|late-pacing|economy>
+ *        --auto-striker <enabled|disabled>
  */
 import { buy, createState, critChance, critMulti, expectedDps, tick } from "../src/game/economy";
 import { formatNumber } from "../src/game/format";
 import { strategyByName } from "./bot-strategy";
 import { mulberry32 } from "./rng";
 import { greedyBuy, StormSimulator, type StormSummary } from "./storm-simulator";
-import { runStormBot, type StormBotSummary } from "./storm-bot";
+import {
+    competentPacingProfile,
+    LATE_PACING_SAMPLE_MINUTES,
+    runStormBot,
+    type StormBotSummary,
+} from "./storm-bot";
 
 interface CliArgs {
-    mode: "storm" | "pacing" | "economy";
+    mode: "storm" | "pacing" | "late-pacing" | "economy";
     durationMin: number;
     strategy: string;
     seed: number;
+    allowAutoStriker: boolean;
 }
 
 /** parse argv into typed options, preserving the legacy `sim <minutes>` form */
 function parseArgs(argv: string[]): CliArgs {
-    const args: CliArgs = { mode: "storm", durationMin: 45, strategy: "bank-at-6", seed: 42 };
+    const args: CliArgs = {
+        mode: "storm",
+        durationMin: 45,
+        strategy: "bank-at-6",
+        seed: 42,
+        allowAutoStriker: true,
+    };
 
     // legacy positional: a single bare number means "economy table, N minutes".
     if (argv.length === 1 && /^\d+(\.\d+)?$/.test(argv[0])) {
@@ -41,8 +55,15 @@ function parseArgs(argv: string[]): CliArgs {
         const value = argv[i + 1];
         switch (flag) {
             case "--mode":
-                if (value !== "storm" && value !== "pacing" && value !== "economy") {
-                    throw new Error(`--mode must be storm|pacing|economy, got ${value}`);
+                if (
+                    value !== "storm" &&
+                    value !== "pacing" &&
+                    value !== "late-pacing" &&
+                    value !== "economy"
+                ) {
+                    throw new Error(
+                        `--mode must be storm|pacing|late-pacing|economy, got ${value}`
+                    );
                 }
                 args.mode = value;
                 i++;
@@ -58,6 +79,13 @@ function parseArgs(argv: string[]): CliArgs {
             }
             case "--strategy":
                 args.strategy = value;
+                i++;
+                break;
+            case "--auto-striker":
+                if (value !== "enabled" && value !== "disabled") {
+                    throw new Error(`--auto-striker must be enabled|disabled, got ${value}`);
+                }
+                args.allowAutoStriker = value === "enabled";
                 i++;
                 break;
             case "--seed": {
@@ -83,6 +111,7 @@ function printPacing(summary: StormBotSummary): void {
     );
     console.log(`duration       : ${summary.durationSec.toFixed(1)}s @ ${summary.stepSec}s step`);
     console.log(`manual cadence : ${summary.manualClicksPerSec.toFixed(2)} clicks/s`);
+    console.log(`hazard model   : ${summary.hazardModel}`);
     console.log(`first surge    : ${formatSeconds(summary.firstSurgeAtSec)}`);
     console.log(`brush affordable: ${formatSeconds(summary.firstBrushAffordableAtSec)}`);
     console.log(`brush painted  : ${formatSeconds(summary.firstBrushPaintedAtSec)}`);
@@ -94,6 +123,9 @@ function printPacing(summary: StormBotSummary): void {
     );
     console.log(`surges         : ${summary.banks} banked / ${summary.busts} busted`);
     console.log(
+        `auto-striker    : level ${summary.autoStrikerLevel}, ${summary.automaticAttacks} strikes, ${formatNumber(summary.autoStrikerEssenceSpent)} essence spent`
+    );
+    console.log(
         `stone stroke    : ${summary.brushCellsPainted} cells / ${summary.brushEssenceSpent} essence`
     );
     console.log(`cum essence    : ${formatNumber(summary.cumulativeEssence)}`);
@@ -104,6 +136,15 @@ function printPacing(summary: StormBotSummary): void {
         `collector       : ${formatNumber(summary.cumulativeEssence)} essence + ${formatNumber(summary.collectorFeeValue)} fee`
     );
     console.log(`blow-up cores  : ${summary.blowUpCores}`);
+    if (summary.samples.length > 0) {
+        console.log("\nmin | cumulative essence | cores/min | auto level");
+        console.log("----|--------------------|-----------|-----------");
+        for (const sample of summary.samples) {
+            console.log(
+                `${String(sample.minute).padStart(3)} | ${formatNumber(sample.cumulativeEssence).padStart(18)} | ${sample.coresPerMin.toFixed(3).padStart(9)} | ${String(sample.autoStrikerLevel).padStart(10)}`
+            );
+        }
+    }
 }
 
 /** format a nullable pacing timestamp for CLI inspection. */
@@ -185,6 +226,20 @@ function main(): void {
                 durationSec: args.durationMin * 60,
                 strategy: strategyByName(args.strategy),
                 seed: args.seed,
+            })
+        );
+        return;
+    }
+    if (args.mode === "late-pacing") {
+        printPacing(
+            runStormBot({
+                durationSec: args.durationMin * 60,
+                profile: competentPacingProfile(args.allowAutoStriker),
+                strategy: strategyByName(args.strategy),
+                seed: args.seed,
+                sampleAtMinutes: LATE_PACING_SAMPLE_MINUTES.filter(
+                    (minute) => minute <= args.durationMin
+                ),
             })
         );
         return;
