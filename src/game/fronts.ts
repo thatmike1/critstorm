@@ -52,6 +52,8 @@ export interface FrontModifiers {
 /** one storm front (arena): terrain hooks, event mix, and payout/risk knobs. */
 export interface FrontDef {
     readonly id: FrontId;
+    /** ordinal from the design's front ladder: Flats 1, Bog 2. */
+    readonly ordinal: number;
     readonly name: string;
     readonly terrain: FrontTerrain;
     readonly eventWeights: StormEventWeights;
@@ -63,6 +65,7 @@ export interface FrontDef {
 // byte-for-byte unchanged.
 const FLATS: FrontDef = {
     id: "flats",
+    ordinal: 1,
     name: "The Flats",
     terrain: { oilPockets: null, plantPatches: null },
     eventWeights: {
@@ -79,6 +82,7 @@ const FLATS: FrontDef = {
 // event cadence runs hotter (riskMult), paying out more for surviving it.
 const BOG: FrontDef = {
     id: "bog",
+    ordinal: 2,
     name: "The Bog",
     terrain: {
         oilPockets: { count: 9, minRadius: 2, maxRadius: 4, minCover: 2 },
@@ -97,6 +101,22 @@ const BOG: FrontDef = {
 export const FRONTS: Readonly<Record<FrontId, FrontDef>> = { flats: FLATS, bog: BOG };
 
 const FRONT_IDS: readonly FrontId[] = ["flats", "bog"];
+
+/** return only implemented fronts unlocked by the purchased Front ladder. */
+export function availableFronts(unlockedFronts: number): readonly FrontDef[] {
+    return FRONT_IDS.map((id) => FRONTS[id]).filter((front) => front.ordinal <= unlockedFronts);
+}
+
+/** resolve a session selection, falling back safely to the always-available flats. */
+export function resolveFrontSelection(
+    requested: string | null | undefined,
+    unlockedFronts: number
+): FrontDef {
+    if (requested === null || requested === undefined) return FLATS;
+    const front = Object.values(FRONTS).find((candidate) => candidate.id === requested);
+    if (!front) return FLATS;
+    return front.ordinal <= unlockedFronts ? front : FLATS;
+}
 
 /**
  * scale a gold payout by the front's reward knob. the economy calls this at
