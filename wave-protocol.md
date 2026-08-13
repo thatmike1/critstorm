@@ -65,13 +65,13 @@ The wave is a `Workflow` script (see `~/.claude/critstorm-wave-4/wave-*.js`). `p
 
 ## Harness: Codex
 
-Codex orchestration follows the same protocol through native subagents in isolated Git worktrees. There is no repository wave runner or generated wave definition: the orchestrator owns the control flow and integrates only after every task is ready.
+Codex orchestration follows the same protocol through native subagents. Implementation and Fix workers use isolated Git worktrees; Review workers read the pushed branch and PR without a write worktree. There is no repository wave runner or generated wave definition: the orchestrator owns the control flow and integrates only after every task is ready.
 
 For each bounded task, the orchestrator:
 
 - runs the deterministic Guard before any worker starts and records the base commit;
 - gives Implement and Review the same task spec, including design sections, owned files, collision warnings, and the instruction to keep existing tests green;
-- starts each worker in its own isolated Git worktree and keeps workers from merging, approving, or touching another worker's scope;
+- starts each Implement and Fix worker in its own isolated Git worktree, while Review workers read the pushed branch and PR without a write worktree; keeps workers from merging, approving, or touching another worker's scope;
 - requires reviewers to remain read-only and post comment-only findings, with no approve or request-changes action;
 - sends confirmed blocker/major findings to Fix, which must disposition every claim before updating the same branch;
 - waits for the human green light before implementation and stops before integration;
