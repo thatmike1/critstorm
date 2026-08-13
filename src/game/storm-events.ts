@@ -24,6 +24,15 @@ export interface StormEvent {
     readonly erupted: number;
 }
 
+/** count the one semantic rod reward attached to each lightning-front event. */
+export function lightningRodStrikeCount(
+    events: readonly StormEvent[],
+    hasRod: boolean
+): number {
+    if (!hasRod) return 0;
+    return events.reduce((count, event) => count + (event.type === "lightning-front" ? 1 : 0), 0);
+}
+
 /** seconds between the first two events of a fresh storm. */
 export const INITIAL_STORM_EVENT_CADENCE = 42;
 /** lower bound on the event interval deep into a storm. */
@@ -169,9 +178,17 @@ function triggerLavaFissure(world: World, severity: number, rng: StormEventRng):
     return { type: "lava-fissure", severity, elapsed: 0, cells, erupted: 0 };
 }
 
-/** return the intentional no-op placeholder for the future lightning front. */
-function triggerLightningFront(severity: number): StormEvent {
-    return { type: "lightning-front", severity, elapsed: 0, cells: [], erupted: 0 };
+/** trace seeded physical lightning bolts; one event remains one semantic event. */
+function triggerLightningFront(world: World, severity: number, rng: StormEventRng): StormEvent {
+    const bolts = Math.min(3, Math.max(1, severity));
+    const changed = new Map<number, StormEventCell>();
+    for (let i = 0; i < bolts; i++) {
+        const x = randomInt(rng, 0, world.sim.W - 1);
+        for (const cell of world.sim.strike(x, 0, rng).changedCells) {
+            changed.set(cell.y * world.sim.W + cell.x, cell);
+        }
+    }
+    return { type: "lightning-front", severity, elapsed: 0, cells: [...changed.values()], erupted: 0 };
 }
 
 /** apply one world event through existing simulation paint and heat primitives. */
@@ -190,7 +207,7 @@ export function triggerStormEvent(
         case "lava-fissure":
             return triggerLavaFissure(world, normalized, rng);
         case "lightning-front":
-            return triggerLightningFront(normalized);
+            return triggerLightningFront(world, normalized, rng);
     }
 }
 

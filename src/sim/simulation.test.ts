@@ -183,6 +183,18 @@ describe("heat field — lava (cool & persist)", () => {
 });
 
 describe("lightning — strike & fade", () => {
+    it("reports only cells whose lightning state actually changed", () => {
+        const preheated = fresh();
+        const metalIndex = idx(20, 1);
+        preheated.paint(20, 1, 0, Mat.METAL);
+        preheated.heat[metalIndex] = 1400;
+        const unchanged = preheated.strike(20, 1, () => 0.5);
+        expect(unchanged.changedCells).not.toContainEqual({ x: 20, y: 1 });
+
+        const changed = fresh().strike(5, 1, () => 0.5);
+        expect(changed.changedCells.length).toBeGreaterThan(0);
+    });
+
     it("writes a bolt on strike, then flashes out within a few frames", () => {
         const s = fresh();
         s.strike(20, 1);

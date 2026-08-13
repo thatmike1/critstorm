@@ -162,7 +162,7 @@ describe("effective per-cell costs", () => {
         expect(paintBrush(discountedSim, discountedState, smallStone, 0.8, 10, 10)).toBe(5);
         expect(fullPriceState.essence).toBe(5);
         expect(discountedState.essence).toBeCloseTo(6, 10);
-        expect(stone.costPerCell).toBe(1);
+        expect(stone.costPerCell).toBe(6);
     });
 
     it("deducts exact undiscounted and discounted Water costs across multiple cells", () => {
@@ -178,7 +178,7 @@ describe("effective per-cell costs", () => {
         expect(paintBrush(discountedSim, discountedState, smallWater, 2.4, 10, 10)).toBe(5);
         expect(fullPriceState.essence).toBe(5);
         expect(discountedState.essence).toBeCloseTo(8, 10);
-        expect(water.costPerCell).toBe(3);
+        expect(water.costPerCell).toBe(7);
     });
 
     it("requires 0.8 essence for one discounted Stone cell", () => {

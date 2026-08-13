@@ -557,7 +557,7 @@ export function runStormBot(config: StormBotConfig): StormBotSummary {
             if (brushPending) {
                 const essenceBefore = economy.essence;
                 const bankedBefore = economy.bankedEssence;
-                brushCellsPainted = paintBrush(brushSim, economy, stone, 20, 15);
+                brushCellsPainted = paintBrush(brushSim, economy, stone, stone.costPerCell, 20, 15);
                 brushEssenceSpent = essenceBefore - economy.essence;
                 brushBankedEssenceDelta = economy.bankedEssence - bankedBefore;
                 firstBrushPaintedAtSec = economy.elapsed;

@@ -4,6 +4,7 @@ import { FRONTS } from "./fronts";
 import { createWorld } from "./world";
 import {
     INITIAL_STORM_EVENT_CADENCE,
+    lightningRodStrikeCount,
     MIN_STORM_EVENT_CADENCE,
     STORM_EVENT_ESCALATION_DURATION,
     StormEvents,
@@ -136,12 +137,27 @@ describe("storm event simulation effects", () => {
         expect(world.sim.totalValue() + lost).toBeCloseTo(goldRain.erupted, 6);
     });
 
-    it("keeps lightning-front as an explicit no-op stub", () => {
+    it("traces lightning-front as physical seeded bolts", () => {
         const world = createWorld({ seed: 5 });
-        const before = Array.from(world.sim.cells);
         const event = triggerStormEvent(world, "lightning-front", 1, fixedRng);
-        expect(event.cells).toEqual([]);
-        expect(Array.from(world.sim.cells)).toEqual(before);
+        expect(event.cells.length).toBeGreaterThan(0);
+        expect(event.cells.some(({ x, y }) => world.sim.cells[y * world.sim.W + x] === Mat.LIGHTNING)).toBe(true);
+        const a = createWorld({ seed: 5 });
+        const b = createWorld({ seed: 5 });
+        expect(triggerStormEvent(a, "lightning-front", 3, createStormEventRng(44))).toEqual(
+            triggerStormEvent(b, "lightning-front", 3, createStormEventRng(44))
+        );
+    });
+
+    it("routes one rod reward per semantic lightning event, not per bolt", () => {
+        const mild = triggerStormEvent(createWorld({ seed: 8 }), "lightning-front", 1, fixedRng);
+        const severe = triggerStormEvent(createWorld({ seed: 8 }), "lightning-front", 5, fixedRng);
+        expect(mild.cells.length).toBeGreaterThan(0);
+        expect(severe.cells.length).toBeGreaterThan(0);
+        expect(lightningRodStrikeCount([mild], true)).toBe(1);
+        expect(lightningRodStrikeCount([severe], true)).toBe(1);
+        expect(lightningRodStrikeCount([mild], false)).toBe(0);
+        expect(lightningRodStrikeCount([{ ...mild, type: "acid-drizzle" }], true)).toBe(0);
     });
 });
 

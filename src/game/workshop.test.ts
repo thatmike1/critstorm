@@ -135,8 +135,8 @@ describe("workshop effect aggregation", () => {
     it("starts at the no-purchases baseline", () => {
         const fx = workshopEffects(createWorkshopState());
         expect(fx).toEqual(baselineEffects());
-        expect(brushCostWith(fx, brushById("stone"))).toBe(1);
-        expect(brushCostWith(fx, brushById("water"))).toBe(3);
+        expect(brushCostWith(fx, brushById("stone"))).toBe(6);
+        expect(brushCostWith(fx, brushById("water"))).toBe(7);
         expect(collectorFeeWith(fx)).toBe(COLLECTOR_BASE_FEE);
         expect(criticalTempWith(fx)).toBe(CORE_CRITICAL_TEMP);
         expect(ambientCoeffWith(fx)).toBe(AMBIENT_HEAT_COEFF);
@@ -198,8 +198,8 @@ describe("workshop effect aggregation", () => {
         expect(fx.ambientHeatMultiplier).toBeCloseTo(0.95 * 0.95 * 0.9 * 0.9 * 0.85, 10);
         expect(ambientCoeffWith(fx)).toBeCloseTo(AMBIENT_HEAT_COEFF * fx.ambientHeatMultiplier, 10);
         expect(fx.brushCostMultipliers).toEqual({ stone: 0.8, water: 0.8 });
-        expect(brushCostWith(fx, brushById("stone"))).toBeCloseTo(0.8, 10);
-        expect(brushCostWith(fx, brushById("water"))).toBeCloseTo(2.4, 10);
+        expect(brushCostWith(fx, brushById("stone"))).toBeCloseTo(4.8, 10);
+        expect(brushCostWith(fx, brushById("water"))).toBeCloseTo(5.6, 10);
     });
 
     it("folds front into unlocks, event modifiers, and the surge tier floor", () => {

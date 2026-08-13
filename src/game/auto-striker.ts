@@ -225,9 +225,10 @@ export function tickAutoStriker(
  * run one manual or automatic strike through the same economy, heat, and surge path.
  * presentation receives the captured result so it can suppress duplicate eruptions.
  * `target` is the aim point in grid cells; the tier-scaled landing spread is applied
- * here with the strike rng, so the impact point handed to `onStrike` is final and
- * the renderer never rolls gameplay-affecting randomness. `heat` defaults to the
- * manual per-click fill; auto strikes pass {@link autoStrikerStrikeHeat}.
+ * here with the strike rng unless `spreadTarget` is false, so the impact point handed
+ * to `onStrike` is final and the renderer never rolls gameplay-affecting randomness.
+ * `heat` defaults to the manual per-click fill; auto strikes pass
+ * {@link autoStrikerStrikeHeat}.
  */
 export function executeStrike(
     economy: EconomyState,
@@ -235,15 +236,39 @@ export function executeStrike(
     rng: () => number,
     callbacks: StrikePathCallbacks,
     target?: StrikeTarget,
-    heat: number = HEAT_PER_STRIKE
+    heat: number = HEAT_PER_STRIKE,
+    spreadTarget: boolean = true
+): AttackResult {
+    return executeResolvedStrike(
+        economy,
+        surge,
+        rng,
+        callbacks,
+        rollAttack(economy, rng),
+        target,
+        heat,
+        spreadTarget
+    );
+}
+
+/** run a pre-resolved result through the same heat, economy, capture, and eruption path. */
+export function executeResolvedStrike(
+    economy: EconomyState,
+    surge: Surge,
+    rng: () => number,
+    callbacks: StrikePathCallbacks,
+    result: AttackResult,
+    target?: StrikeTarget,
+    heat: number = HEAT_PER_STRIKE,
+    spreadTarget: boolean = true
 ): AttackResult {
     if (surge.addHeat(heat)) callbacks.onSurgeStart();
-    const result = surge.resolveResult(rollAttack(economy, rng));
-    applyAttack(economy, result);
-    const captured = surge.recordStrike(result, baseDamage(economy));
-    const impact = target ? applyStrikeSpread(target, result.tier, rng) : undefined;
-    callbacks.onStrike(result, captured, impact);
-    return result;
+    const effective = surge.resolveResult(result);
+    applyAttack(economy, effective);
+    const captured = surge.recordStrike(effective, baseDamage(economy));
+    const impact = target && spreadTarget ? applyStrikeSpread(target, effective.tier, rng) : target;
+    callbacks.onStrike(effective, captured, impact);
+    return effective;
 }
 
 /** render the placed turret at its grid position with a brief muzzle tell on fire. */

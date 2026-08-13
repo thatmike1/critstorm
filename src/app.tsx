@@ -3,6 +3,7 @@ import { CritEngine } from "./game/crit-engine";
 import { AudioEngine } from "./game/audio";
 import {
     createState,
+    baseDamage,
     creditEssence,
     buy,
     canBuy,
@@ -11,9 +12,11 @@ import {
     critChance,
     critMulti,
     goldenChance,
+    MAX_TIER,
     rankInfo,
     UPGRADES,
     type EconomyState,
+    type AttackResult,
     type RankInfo,
     type UpgradeId,
 } from "./game/economy";
@@ -25,7 +28,7 @@ import { Collector, defaultCollectorRegion } from "./game/collector";
 import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
-import { StormEvents, createStormEventRng } from "./game/storm-events";
+import { lightningRodStrikeCount, StormEvents, createStormEventRng } from "./game/storm-events";
 import {
     applyPayoutModifier,
     frontFromQuery,
@@ -33,9 +36,22 @@ import {
     setSelectedFront,
     type FrontId,
 } from "./game/fronts";
-import { STRUCTURES, canPlaceStructure, placeMagnet, type StructureId } from "./game/structures";
+import {
+    STRUCTURES,
+    canPlaceStructure,
+    placeLightningRod,
+    placeMagnet,
+    placeSprinkler,
+    tickSprinkler,
+    isStructureInstalled,
+    type LightningRodState,
+    type SingularStructureId,
+    type SprinklerState,
+    type StructureId,
+} from "./game/structures";
 import {
     AUTO_STRIKER_MAX_LEVEL,
+    HEAT_PER_STRIKE,
     autoStrikerAim,
     autoStrikerInterval,
     autoStrikerStrikeHeat,
@@ -43,6 +59,7 @@ import {
     canUpgradeAutoStriker,
     createAutoStrikerState,
     defaultAutoStrikerPosition,
+    executeResolvedStrike,
     executeStrike,
     placeAutoStriker,
     tickAutoStriker,
@@ -240,6 +257,11 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     // structures use the same purchase flow as brushes but place once on click;
     // they are never painted as a drag stroke.
     const [selectedStructure, setSelectedStructure] = useState<StructureId | null>(null);
+    const [installedStructures, setInstalledStructures] = useState<
+        Record<SingularStructureId, boolean>
+    >({ sprinkler: false, "lightning-rod": false });
+    const sprinklerRef = useRef<SprinklerState | null>(null);
+    const lightningRodRef = useRef<LightningRodState | null>(null);
     const paintingRef = useRef(false);
     // surge-HUD edge trackers (design §3 legibility): the pot readout replays its
     // land animation only when the pot actually grows, and the ignition flash fires
@@ -254,34 +276,44 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
      * path. `target` is the aim point in grid cells; `heat` defaults to the manual
      * per-click fill and turret fires pass their cadence-scaled heat instead.
      */
+    const strikeCallbacks = {
+        onSurgeStart: () => {
+            markFirstSurge(stateRef.current);
+            lifecycleRef.current.recordSurgeStart();
+            audioRef.current.frenzy();
+        },
+        onStrike: (result: AttackResult, captured: boolean, strikeTarget?: StrikeTarget) => {
+            engineRef.current?.spawn(result.damage, result.tier, result.golden);
+            if (!captured) {
+                engineRef.current?.erupt(
+                    result.damage * effects.eruptionValueMultiplier,
+                    result.tier,
+                    strikeTarget
+                );
+            }
+            audioRef.current.attack(Math.max(result.tier, 1));
+            if (result.golden) audioRef.current.golden();
+        },
+    };
+
     const runStrike = (target?: StrikeTarget, heat?: number): void => {
-        executeStrike(
-            stateRef.current,
+        executeStrike(stateRef.current, surgeRef.current, Math.random, strikeCallbacks, target, heat);
+    };
+
+    /** trigger one non-golden max-tier strike at the placed rod through the shared path. */
+    const runLightningRodStrike = (): void => {
+        const rod = lightningRodRef.current;
+        if (!rod) return;
+        const economy = stateRef.current;
+        executeResolvedStrike(
+            economy,
             surgeRef.current,
             Math.random,
-            {
-                onSurgeStart: () => {
-                    markFirstSurge(stateRef.current);
-                    lifecycleRef.current.recordSurgeStart();
-                    audioRef.current.frenzy();
-                },
-                onStrike: (result, captured, strikeTarget) => {
-                    engineRef.current?.spawn(result.damage, result.tier, result.golden);
-                    if (!captured) {
-                        // forge wiring (design §5): eruption-value nodes fatten the
-                        // gold a strike erupts into the world, at the source seam.
-                        engineRef.current?.erupt(
-                            result.damage * effects.eruptionValueMultiplier,
-                            result.tier,
-                            strikeTarget
-                        );
-                    }
-                    audioRef.current.attack(Math.max(result.tier, 1));
-                    if (result.golden) audioRef.current.golden();
-                },
-            },
-            target,
-            heat
+            strikeCallbacks,
+            { damage: baseDamage(economy) * Math.pow(critMulti(economy), MAX_TIER), tier: MAX_TIER, golden: false },
+            { x: rod.x, y: rod.y },
+            HEAT_PER_STRIKE,
+            false
         );
     };
 
@@ -372,7 +404,14 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 // core reacts in a fixed order as the core heats toward critical, so the
                 // ride reads. consumes coreLoad only; 0 while idle clears the tells.
                 engine!.applyTells(surge.active ? surge.coreLoad : 0);
-                stormEventsRef.current?.tick(s.elapsed);
+                const events = stormEventsRef.current?.tick(s.elapsed) ?? [];
+                if (sprinklerRef.current) {
+                    tickSprinkler(e.simulation, sprinklerRef.current, s, dt);
+                }
+                if (lightningRodRef.current) {
+                    const rodStrikes = lightningRodStrikeCount(events, true);
+                    for (let i = 0; i < rodStrikes; i++) runLightningRodStrike();
+                }
                 hudTimer += dt;
                 if (hudTimer >= 0.1) {
                     hudTimer = 0;
@@ -465,6 +504,26 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             // the turret is singular: leave placement mode once it stands.
             setSelectedStructure(null);
             setHud(snapshot(stateRef.current, autoStrikerRef.current));
+        }
+        if (structureId === "sprinkler") {
+            const placed = placeSprinkler(sim, stateRef.current, gx, gy);
+            if (placed) {
+                sprinklerRef.current = placed;
+                setInstalledStructures((current) => ({ ...current, sprinkler: true }));
+                audioRef.current.buy();
+                setSelectedStructure(null);
+                setHud(snapshot(stateRef.current, autoStrikerRef.current));
+            }
+        }
+        if (structureId === "lightning-rod") {
+            const placed = placeLightningRod(sim, stateRef.current, gx, gy);
+            if (placed) {
+                lightningRodRef.current = placed;
+                setInstalledStructures((current) => ({ ...current, "lightning-rod": true }));
+                audioRef.current.buy();
+                setSelectedStructure(null);
+                setHud(snapshot(stateRef.current, autoStrikerRef.current));
+            }
         }
     };
 
@@ -620,6 +679,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     /** pick a one-click structure, or deselect it to return to attack mode. */
     const toggleStructure = (id: StructureId) => {
         audioRef.current.unlock();
+        if (isStructureInstalled(id, installedStructures)) return;
         setSelectedBrush(null);
         setSelectedStructure((cur) => (cur === id ? null : id));
     };
@@ -818,7 +878,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                     ))}
                 </div>
                 <div className="brushes">
-                    <div className="brushes-label">routing structures</div>
+                    <div className="brushes-label">structures</div>
                     {hud.autoStrikerLevel > 0 && (
                         <button
                             className="brush"
@@ -843,23 +903,29 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                     )}
                     {STRUCTURES.filter(
                         (structure) => structure.id !== "auto-striker" || hud.autoStrikerLevel === 0
-                    ).map((structure) => (
-                        <button
-                            key={structure.id}
-                            className={
-                                selectedStructure === structure.id ? "brush selected" : "brush"
-                            }
-                            disabled={
-                                selectedStructure !== structure.id &&
-                                !canPlaceStructure(stateRef.current, structure)
-                            }
-                            onClick={() => toggleStructure(structure.id)}
-                        >
-                            <span className="upgrade-name">{structure.name}</span>
-                            <span className="upgrade-desc">{structure.desc}</span>
-                            <span className="upgrade-cost">{formatNumber(structure.cost)}</span>
-                        </button>
-                    ))}
+                    ).map((structure) => {
+                        const installed = isStructureInstalled(structure.id, installedStructures);
+                        return (
+                            <button
+                                key={structure.id}
+                                className={
+                                    selectedStructure === structure.id ? "brush selected" : "brush"
+                                }
+                                disabled={
+                                    installed ||
+                                    (selectedStructure !== structure.id &&
+                                        !canPlaceStructure(stateRef.current, structure))
+                                }
+                                onClick={() => toggleStructure(structure.id)}
+                            >
+                                <span className="upgrade-name">{structure.name}</span>
+                                <span className="upgrade-desc">{structure.desc}</span>
+                                <span className="upgrade-cost">
+                                    {installed ? "installed" : formatNumber(structure.cost)}
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
                 <p className="hint">
                     {selectedStructure
