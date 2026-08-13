@@ -191,6 +191,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             {
                 criticalTemp: criticalTempWith(effects),
                 ambientCoeff: ambientCoeffWith(effects),
+                tierFloor: effects.surgeTierFloor,
+                payoutForTier: (result, originalTier, tier) =>
+                    result.damage * Math.pow(critMulti(stateRef.current), tier - originalTier),
             }
         );
     // the surge state machine replaces frenzy (design §3): it owns the heat meter,

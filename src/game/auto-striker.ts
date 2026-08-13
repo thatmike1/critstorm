@@ -238,7 +238,7 @@ export function executeStrike(
     heat: number = HEAT_PER_STRIKE
 ): AttackResult {
     if (surge.addHeat(heat)) callbacks.onSurgeStart();
-    const result = rollAttack(economy, rng);
+    const result = surge.resolveResult(rollAttack(economy, rng));
     applyAttack(economy, result);
     const captured = surge.recordStrike(result, baseDamage(economy));
     const impact = target ? applyStrikeSpread(target, result.tier, rng) : undefined;

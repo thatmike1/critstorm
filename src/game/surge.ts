@@ -150,13 +150,34 @@ export interface SurgeListeners {
  * them default (real randomness, the base {@link CORE_CRITICAL_TEMP}) while tests
  * and the tuning harness seed the spike lottery and vary the ceiling.
  */
-export interface SurgeOptions {
+export interface SurgeResultOptions {
+    /** minimum tier for captured surge crits; non-crits and outside strikes are unchanged. */
+    tierFloor?: number;
+    /** recalculate a captured crit's payout when the tier floor raises its tier. */
+    payoutForTier?: (result: AttackResult, originalTier: number, tier: number) => number;
+}
+
+export interface SurgeOptions extends SurgeResultOptions {
     /** `[0,1)` source for the per-crit heat-spike lottery; defaults to `Math.random`. */
     rng?: SurgeRng;
     /** core critical temperature; defaults to {@link CORE_CRITICAL_TEMP} (Aegis raises it). */
     criticalTemp?: number;
     /** ambient-ramp coefficient `q`; defaults to {@link AMBIENT_HEAT_COEFF}. */
     ambientCoeff?: number;
+}
+
+/** resolve a rolled attack for a live surge without mutating the caller's result. */
+export function resolveSurgeResult(
+    result: AttackResult,
+    options: SurgeResultOptions = {}
+): AttackResult {
+    const floor = Math.max(SURGE_TIER_FLOOR, Math.floor(options.tierFloor ?? SURGE_TIER_FLOOR));
+    if (result.tier <= 0 || result.tier >= floor) return { ...result };
+    return {
+        ...result,
+        tier: floor,
+        damage: options.payoutForTier?.(result, result.tier, floor) ?? result.damage,
+    };
 }
 
 /** `M = 1.5^n` for `n` crits landed this surge (design §3/§6). */
@@ -186,12 +207,19 @@ export class Surge {
     private readonly rng: SurgeRng;
     private readonly _criticalTemp: number;
     private readonly ambientCoeff: number;
+    private readonly tierFloor: number;
+    private readonly payoutForTier: SurgeOptions["payoutForTier"];
 
     constructor(listeners: SurgeListeners = {}, options: SurgeOptions = {}) {
         this.listeners = listeners;
         this.rng = options.rng ?? Math.random;
         this._criticalTemp = options.criticalTemp ?? CORE_CRITICAL_TEMP;
         this.ambientCoeff = options.ambientCoeff ?? AMBIENT_HEAT_COEFF;
+        this.tierFloor = Math.max(
+            SURGE_TIER_FLOOR,
+            Math.floor(options.tierFloor ?? SURGE_TIER_FLOOR)
+        );
+        this.payoutForTier = options.payoutForTier;
     }
 
     /** current phase: `idle` (filling heat) or `surging` (a pot is live). */
@@ -202,6 +230,15 @@ export class Surge {
     /** true while a surge is live (convenience over comparing {@link phase}). */
     get active(): boolean {
         return this._phase === "surging";
+    }
+
+    /** resolve one attack using this surge's floor, or copy it unchanged while idle. */
+    resolveResult(result: AttackResult): AttackResult {
+        if (!this.active) return { ...result };
+        return resolveSurgeResult(result, {
+            tierFloor: this.tierFloor,
+            payoutForTier: this.payoutForTier,
+        });
     }
 
     /** the pre-surge heat meter, clamped to `[0, SURGE_HEAT_THRESHOLD]`. */
@@ -268,7 +305,8 @@ export class Surge {
      * pot can overheat the core. if the spike pushes the core past critical the surge
      * busts immediately (the exit seam fires with reason `bust`, capturing this crit
      * in the pot — you rode it, it pumped, then it burned). a no-op outside a surge.
-     * @param result the rolled attack; `tier > 0` marks it a crit.
+     * @param result the effective attack returned by {@link resolveResult}; `tier > 0`
+     *   marks it a crit.
      * @param base the current base damage, added for a non-crit strike.
      * @returns true iff the strike was captured by the pot. callers must use this —
      *   not {@link active} — to decide whether the strike still erupts as world gold:
