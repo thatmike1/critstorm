@@ -6,20 +6,22 @@
  *   npm run sim                          # default storm (bank-at-6, 45 min, seed 42)
  *   npm run sim -- --duration 20 --strategy always-ride --seed 7
  *   npm run sim -- --strategy bank-at-8
+ *   npm run sim -- --mode pacing --duration 2 --seed 42
  *   npm run sim -- --mode economy        # legacy greedy-economy table
  *   npm run sim 20                       # legacy: economy table, 20 minutes
  *
  * flags: --duration <minutes> --strategy <never-ride|always-ride|bank-at-n>
- *        --seed <int> --mode <storm|economy>
+ *        --seed <int> --mode <storm|pacing|economy>
  */
 import { buy, createState, critChance, critMulti, expectedDps, tick } from "../src/game/economy";
 import { formatNumber } from "../src/game/format";
 import { strategyByName } from "./bot-strategy";
 import { mulberry32 } from "./rng";
 import { greedyBuy, StormSimulator, type StormSummary } from "./storm-simulator";
+import { runStormBot, type StormBotSummary } from "./storm-bot";
 
 interface CliArgs {
-    mode: "storm" | "economy";
+    mode: "storm" | "pacing" | "economy";
     durationMin: number;
     strategy: string;
     seed: number;
@@ -39,8 +41,8 @@ function parseArgs(argv: string[]): CliArgs {
         const value = argv[i + 1];
         switch (flag) {
             case "--mode":
-                if (value !== "storm" && value !== "economy") {
-                    throw new Error(`--mode must be storm|economy, got ${value}`);
+                if (value !== "storm" && value !== "pacing" && value !== "economy") {
+                    throw new Error(`--mode must be storm|pacing|economy, got ${value}`);
                 }
                 args.mode = value;
                 i++;
@@ -72,6 +74,35 @@ function parseArgs(argv: string[]): CliArgs {
         }
     }
     return args;
+}
+
+/** render the measured fresh-player §8 pacing gates and routing accounting. */
+function printPacing(summary: StormBotSummary): void {
+    console.log(
+        `pacing  profile=${summary.profile}  strategy=${summary.strategy}  seed=${summary.seed}`
+    );
+    console.log(`duration       : ${summary.durationSec.toFixed(1)}s @ ${summary.stepSec}s step`);
+    console.log(`manual cadence : ${summary.manualClicksPerSec.toFixed(2)} clicks/s`);
+    console.log(`first surge    : ${formatSeconds(summary.firstSurgeAtSec)}`);
+    console.log(`brush affordable: ${formatSeconds(summary.firstBrushAffordableAtSec)}`);
+    console.log(`brush painted  : ${formatSeconds(summary.firstBrushPaintedAtSec)}`);
+    console.log(
+        `manual actions  : ${summary.manualActions} (${summary.manualAttacks} attacks + ${summary.brushActions} paint)`
+    );
+    console.log(
+        `strike routing  : ${summary.attacks} total = ${summary.routedAttacks} world + ${summary.capturedAttacks} pot`
+    );
+    console.log(`surges         : ${summary.banks} banked / ${summary.busts} busted`);
+    console.log(
+        `stone stroke    : ${summary.brushCellsPainted} cells / ${summary.brushEssenceSpent} essence`
+    );
+    console.log(`cum essence    : ${formatNumber(summary.cumulativeEssence)}`);
+    console.log(`blow-up cores  : ${summary.blowUpCores}`);
+}
+
+/** format a nullable pacing timestamp for CLI inspection. */
+function formatSeconds(value: number | null): string {
+    return value === null ? "not reached" : `${value.toFixed(1)}s`;
 }
 
 /**
@@ -132,14 +163,24 @@ function printStorm(summary: StormSummary): void {
     console.log(`attacks        : ${summary.attacks}`);
     console.log(`crits          : ${summary.crits}`);
     console.log(`golden hits    : ${summary.goldenHits}`);
-    console.log(`banks          : ${summary.banks}  (0 until surge mechanics land)`);
-    console.log(`busts          : ${summary.busts}  (0 until surge mechanics land)`);
+    console.log(`banks          : ${summary.banks}  (fast long-arc model omits surges)`);
+    console.log(`busts          : ${summary.busts}  (fast long-arc model omits surges)`);
 }
 
 function main(): void {
     const args = parseArgs(process.argv.slice(2));
     if (args.mode === "economy") {
         runEconomyMode(args.durationMin, args.seed);
+        return;
+    }
+    if (args.mode === "pacing") {
+        printPacing(
+            runStormBot({
+                durationSec: args.durationMin * 60,
+                strategy: strategyByName(args.strategy),
+                seed: args.seed,
+            })
+        );
         return;
     }
     const summary = new StormSimulator({

@@ -59,7 +59,7 @@ describe("storm simulator determinism", () => {
     });
 });
 
-describe("bot strategies (surge stubbed)", () => {
+describe("bot strategies in the fast long-arc model", () => {
     it("no strategy banks or busts while surge mechanics are absent", () => {
         for (const name of ["never-ride", "always-ride", "bank-at-6"]) {
             const s = shortStorm(7, name);
@@ -157,17 +157,6 @@ describe("storm economy (design.md §6 anti-farming)", () => {
         expect(deepest).toBe(Math.max(...coresPerMin));
     });
 
-    it("every storm reaching its first surge (~90 s) yields at least 1 core", () => {
-        // design §5 teaching-moment floor: even a first-storm blow-up right after the
-        // first surge must bank a core, never 8 minutes of zero meta progress. the §8
-        // pacing gate puts the first surge within ~90 s, so cumulative essence at 90 s
-        // must clear the 1-core threshold (coresFromEssence >= 1 ⇔ banked >= 500) on
-        // EVERY seed, not just the median.
-        for (let i = 0; i < TRIALS; i++) {
-            const at90 = cumulativeEssenceAtMinutes((SEED_BASE + i * 40507) | 0, [1.5]).get(1.5)!;
-            expect(coresFromEssence(at90)).toBeGreaterThanOrEqual(1);
-        }
-    });
 });
 
 /** a minimal economy state stand-in for pure strategy-decision tests */

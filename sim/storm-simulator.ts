@@ -8,8 +8,8 @@
  * composition per frame: advance the economy (rolling attacks), spend essence
  * with a greedy dps policy, fire a physical strike into the sim for notable
  * crits, step the sim one frame, then let the strategy decide bank-or-ride. the
- * surge bank/ride path is stubbed until the hkm.* surge mechanics land; the
- * wiring is in place so it activates without reworking this loop.
+ * this remains the fast long-arc economic model. the §8 click/surge/brush pacing
+ * path lives in storm-bot.ts and drives the real gameplay state machines.
  */
 import {
     applyAttack,
@@ -101,9 +101,9 @@ export interface StormSummary {
     attacks: number;
     crits: number;
     goldenHits: number;
-    /** surge banks taken — 0 until surge mechanics (hkm.*) land */
+    /** surge banks taken — 0 in this fast long-arc model; see storm-bot.ts for live surges. */
     banks: number;
-    /** surge overheat busts — 0 until surge mechanics (hkm.*) land */
+    /** surge busts — 0 in this fast long-arc model; see storm-bot.ts for live surges. */
     busts: number;
     rank: string;
     samples: MinuteSample[];
@@ -211,7 +211,7 @@ export function cumulativeEssenceAtMinutes(
     const economy = createState();
     const autoStriker = createAutoStrikerState();
     // targets in seconds, ascending; supports fractional-minute marks (e.g. the
-    // 90 s first-surge mark) as well as the whole-minute arc.
+    // fractional-minute marks as well as the whole-minute arc.
     const targets = [...new Set(minutes)].sort((a, b) => a - b).map((m) => ({ m, sec: m * 60 }));
     // +2 frames of buffer so the last target's second is strictly crossed despite
     // float accumulation of the 0.05 s step — otherwise it can fall a rounding
@@ -334,7 +334,7 @@ export class StormSimulator {
                 time: economy.elapsed,
                 economy,
                 coreTemp: sim.heat[coreIdx],
-                // surge undefined until hkm.* surge mechanics land
+                // the fast long-arc path omits surge state; storm-bot.ts drives it.
                 surge: undefined,
             };
             const action = strategy.decide(view);

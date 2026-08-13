@@ -2,7 +2,15 @@ import { describe, it, expect } from "vitest";
 import { Simulation } from "../sim/simulation";
 import { Mat } from "../sim/materials";
 import { createState } from "./economy";
-import { BRUSHES, brushById, canPaint, paintBrush, type BrushDef } from "./brush";
+import {
+    BRUSHES,
+    brushById,
+    canPaint,
+    fullStrokeCellCount,
+    fullStrokeCost,
+    paintBrush,
+    type BrushDef,
+} from "./brush";
 
 const stone = brushById("stone");
 const water = brushById("water");
@@ -27,6 +35,11 @@ describe("brush catalogue", () => {
     it("maps each brush to its sim material", () => {
         expect(stone.mat).toBe(Mat.STONE);
         expect(water.mat).toBe(Mat.WATER);
+    });
+
+    it("prices one complete radius-3 stone stroke as 29 cells", () => {
+        expect(fullStrokeCellCount(stone)).toBe(29);
+        expect(fullStrokeCost(stone)).toBe(174);
     });
 });
 
