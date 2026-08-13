@@ -47,6 +47,7 @@ import {
 import {
     ambientCoeffWith,
     applyStormStart,
+    brushCostWith,
     buyNode,
     creditCores,
     collectorFeeWith,
@@ -426,10 +427,11 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         if (!brushId || !engine || !rect || rect.width === 0 || rect.height === 0) return;
         const brush = BRUSHES.find((b) => b.id === brushId);
         if (!brush) return;
+        const costPerCell = brushCostWith(effects, brush);
         const sim = engine.simulation;
         const gx = Math.floor(((clientX - rect.left) / rect.width) * sim.W);
         const gy = Math.floor(((clientY - rect.top) / rect.height) * sim.H);
-        const painted = paintBrush(sim, stateRef.current, brush, gx, gy);
+        const painted = paintBrush(sim, stateRef.current, brush, costPerCell, gx, gy);
         if (painted > 0) setHud(snapshot(stateRef.current, autoStrikerRef.current));
     };
 
@@ -621,7 +623,8 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     const headroom = coreHeadroom(surgeHud.coreTemp, surgeHud.criticalTemp);
     // a brush is "buyable" while at least one cell of it is affordable — the same
     // essence gate paintBrush enforces per cell (design §4.2).
-    const affordBrush = (b: BrushDef): boolean => canPaint(stateRef.current, b);
+    const affordBrush = (b: BrushDef): boolean =>
+        canPaint(stateRef.current, brushCostWith(effects, b));
 
     // storm over: the results screen replaces the whole cabinet until NEXT STORM
     // (design §5 — the moment that teaches quitting while ahead is smart). the
@@ -801,7 +804,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                         >
                             <span className="upgrade-name">{b.name}</span>
                             <span className="upgrade-desc">{b.desc}</span>
-                            <span className="upgrade-cost">{formatNumber(b.costPerCell)}/cell</span>
+                            <span className="upgrade-cost">
+                                {formatNumber(brushCostWith(effects, b))}/cell
+                            </span>
                         </button>
                     ))}
                 </div>

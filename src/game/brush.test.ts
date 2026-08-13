@@ -35,7 +35,7 @@ describe("paintBrush per-cell cost deduction", () => {
         const sim = new Simulation(40, 30);
         const state = createState();
         state.essence = 1000;
-        const painted = paintBrush(sim, state, stone, 20, 15);
+        const painted = paintBrush(sim, state, stone, stone.costPerCell, 20, 15);
         expect(painted).toBeGreaterThan(0);
         expect(countMat(sim, Mat.STONE)).toBe(painted);
         expect(state.essence).toBeCloseTo(1000 - painted * stone.costPerCell, 10);
@@ -45,7 +45,7 @@ describe("paintBrush per-cell cost deduction", () => {
         const sim = new Simulation(40, 30);
         const state = createState();
         state.essence = 1000;
-        const painted = paintBrush(sim, state, water, 20, 15);
+        const painted = paintBrush(sim, state, water, water.costPerCell, 20, 15);
         expect(state.essence).toBeCloseTo(1000 - painted * water.costPerCell, 10);
     });
 
@@ -53,10 +53,10 @@ describe("paintBrush per-cell cost deduction", () => {
         const sim = new Simulation(40, 30);
         const state = createState();
         state.essence = 1000;
-        const first = paintBrush(sim, state, stone, 20, 15);
+        const first = paintBrush(sim, state, stone, stone.costPerCell, 20, 15);
         const afterFirst = state.essence;
         // repainting the identical spot re-paints nothing and costs nothing.
-        const second = paintBrush(sim, state, stone, 20, 15);
+        const second = paintBrush(sim, state, stone, stone.costPerCell, 20, 15);
         expect(second).toBe(0);
         expect(state.essence).toBe(afterFirst);
         expect(countMat(sim, Mat.STONE)).toBe(first);
@@ -68,8 +68,8 @@ describe("paintBrush insufficient-essence rejection", () => {
         const sim = new Simulation(40, 30);
         const state = createState();
         state.essence = 0;
-        expect(canPaint(state, stone)).toBe(false);
-        const painted = paintBrush(sim, state, stone, 20, 15);
+        expect(canPaint(state, stone.costPerCell)).toBe(false);
+        const painted = paintBrush(sim, state, stone, stone.costPerCell, 20, 15);
         expect(painted).toBe(0);
         expect(countMat(sim, Mat.STONE)).toBe(0);
         expect(state.essence).toBe(0);
@@ -80,7 +80,14 @@ describe("paintBrush insufficient-essence rejection", () => {
         const state = createState();
         // enough for exactly three cells of a larger disc.
         state.essence = 3 * stone.costPerCell;
-        const painted = paintBrush(sim, state, brushWithRadius(stone, 5), 20, 15);
+        const painted = paintBrush(
+            sim,
+            state,
+            brushWithRadius(stone, 5),
+            stone.costPerCell,
+            20,
+            15
+        );
         expect(painted).toBe(3);
         expect(countMat(sim, Mat.STONE)).toBe(3);
         expect(state.essence).toBe(0);
@@ -99,7 +106,7 @@ describe("paintBrush never destroys value", () => {
         sim.addValue(21, 15, 250);
         const totalBefore = sim.totalValue();
 
-        const painted = paintBrush(sim, state, stone, 20, 15);
+        const painted = paintBrush(sim, state, stone, stone.costPerCell, 20, 15);
 
         expect(painted).toBeGreaterThan(0);
         // the gold cells survive untouched.
@@ -118,7 +125,76 @@ describe("paintBrush never destroys value", () => {
         const state = createState();
         state.essence = 1000;
         sim.cells[15 * sim.W + 20] = Mat.WALL;
-        paintBrush(sim, state, water, 20, 15);
+        paintBrush(sim, state, water, water.costPerCell, 20, 15);
         expect(sim.cells[15 * sim.W + 20]).toBe(Mat.WALL);
+    });
+});
+
+describe("effective per-cell costs", () => {
+    it("deducts exact undiscounted and discounted Stone costs across multiple cells", () => {
+        const fullPriceSim = new Simulation(20, 20);
+        const discountedSim = new Simulation(20, 20);
+        const fullPriceState = createState();
+        const discountedState = createState();
+        fullPriceState.essence = 10;
+        discountedState.essence = 10;
+        const smallStone = brushWithRadius(stone, 1);
+
+        expect(paintBrush(fullPriceSim, fullPriceState, smallStone, 1, 10, 10)).toBe(5);
+        expect(paintBrush(discountedSim, discountedState, smallStone, 0.8, 10, 10)).toBe(5);
+        expect(fullPriceState.essence).toBe(5);
+        expect(discountedState.essence).toBeCloseTo(6, 10);
+        expect(stone.costPerCell).toBe(1);
+    });
+
+    it("deducts exact undiscounted and discounted Water costs across multiple cells", () => {
+        const fullPriceSim = new Simulation(20, 20);
+        const discountedSim = new Simulation(20, 20);
+        const fullPriceState = createState();
+        const discountedState = createState();
+        fullPriceState.essence = 20;
+        discountedState.essence = 20;
+        const smallWater = brushWithRadius(water, 1);
+
+        expect(paintBrush(fullPriceSim, fullPriceState, smallWater, 3, 10, 10)).toBe(5);
+        expect(paintBrush(discountedSim, discountedState, smallWater, 2.4, 10, 10)).toBe(5);
+        expect(fullPriceState.essence).toBe(5);
+        expect(discountedState.essence).toBeCloseTo(8, 10);
+        expect(water.costPerCell).toBe(3);
+    });
+
+    it("requires 0.8 essence for one discounted Stone cell", () => {
+        const sim = new Simulation(20, 20);
+        const state = createState();
+        const singleStone = brushWithRadius(stone, 0);
+
+        state.essence = 0.79;
+        expect(canPaint(state, 0.8)).toBe(false);
+        expect(paintBrush(sim, state, singleStone, 0.8, 10, 10)).toBe(0);
+        expect(state.essence).toBe(0.79);
+
+        state.essence = 0.8;
+        expect(canPaint(state, 0.8)).toBe(true);
+        expect(paintBrush(sim, state, singleStone, 0.8, 10, 10)).toBe(1);
+        expect(state.essence).toBeCloseTo(0, 10);
+    });
+
+    it("does not charge a discounted brush for protected or already-matching cells", () => {
+        const sim = new Simulation(20, 20);
+        const state = createState();
+        state.essence = 10;
+        sim.cells[10 * sim.W + 10] = Mat.GOLD;
+        sim.addValue(10, 10, 50);
+        sim.cells[10 * sim.W + 11] = Mat.WALL;
+        sim.cells[11 * sim.W + 10] = Mat.STONE;
+        const smallStone = brushWithRadius(stone, 1);
+
+        const painted = paintBrush(sim, state, smallStone, 0.8, 10, 10);
+
+        expect(painted).toBe(2);
+        expect(state.essence).toBeCloseTo(8.4, 10);
+        expect(sim.getValue(10, 10)).toBe(50);
+        expect(sim.cells[10 * sim.W + 11]).toBe(Mat.WALL);
+        expect(sim.cells[11 * sim.W + 10]).toBe(Mat.STONE);
     });
 });
