@@ -746,6 +746,11 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 onPointerUp={stopPainting}
                 onPointerLeave={stopPainting}
             />
+            {/* the hanging house sign over the screen: permanent cabinet
+                architecture, not a state readout. */}
+            <div className="marquee-sign">
+                <span>CRITSTORM</span>
+            </div>
             <aside className="hud">
                 <div className="title-row">
                     <h1>critstorm</h1>

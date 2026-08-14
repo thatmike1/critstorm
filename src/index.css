@@ -1,35 +1,39 @@
-/* critstorm — premium slot-cabinet skin.
+/* critstorm — vegas marquee skin: a pixel-built casino cabinet.
    single locked dark theme by design: a casino machine is never light-mode.
-   accent lock: gold = trim + money everywhere, red = heat / frenzy danger. */
+   accent lock: gold = trim + money everywhere, red = heat / surge danger.
+
+   vocabulary, enforced everywhere below — no SaaS chrome:
+     · zero border-radius, zero blur, zero glow shadows, zero smooth gradients
+     · fills are flat or hard-stop bands; shadows are hard offsets / inset steps
+     · everything that moves, moves in steps() — nothing eases
+     · Press Start 2P = display words, Silkscreen = labels, VT323 = every numeral */
 
 :root {
-  --cabinet: #0d0b08;
-  --cabinet-raised: #17130c;
-  --cabinet-seam: #050403;
-  --felt: #0a1f16;
-  --felt-hi: #12352600;
+  --felt: #4a0c14;
+  --felt-deep: #2c060c;
+  --felt-lit: #641019;
+  --black: #120204;
 
-  --gold: #f4cf5a;
-  --gold-hi: #fff2c2;
-  --gold-deep: #a97d24;
-  --gold-shadow: #6f4f14;
-  --grad-gold: linear-gradient(180deg, #fff2c2 0%, #f4cf5a 42%, #cf9f34 72%, #8f6a1e 100%);
-  --grad-gold-v: linear-gradient(90deg, #fff2c2 0%, #f4cf5a 42%, #cf9f34 72%, #8f6a1e 100%);
+  --gold: #ffd75e;
+  --gold-deep: #b3861f;
+  --gold-dim: #7a5c15;
+  --bulb: #fff3c8;
 
+  /* brass = an unlit bulb. the strips at rest are mostly this. */
+  --brass: #4d3812;
+  --brass-lit: #6b4d16;
+
+  /* red is reserved for heat and danger, never for trim. */
   --red: #ff2e46;
-  --red-hot: #ff5a70;
   --red-deep: #7a0f1f;
 
-  --ink: #efe6cf;
-  --ink-dim: #b6a374;
-  --ink-faint: #7c6c47;
+  --ink: #f0dcb0;
+  --ink-dim: #b3861f;
+  --ink-faint: #8a6a2a;
 
-  --bulb-lit: #ffe89a;
-  --bulb-dim: #59421a;
-
-  --font-cabinet: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-display: 'Arial Black', 'Arial Narrow Bold', Impact, 'Franklin Gothic Bold', sans-serif;
-  --font-num: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Consolas', 'Menlo', monospace;
+  --font-display: 'Press Start 2P', monospace;
+  --font-label: 'Silkscreen', monospace;
+  --font-num: 'VT323', monospace;
 }
 
 * {
@@ -42,15 +46,120 @@ html,
 body,
 #root {
   height: 100%;
-  background: var(--cabinet);
+  background: var(--black);
   color: var(--ink);
-  font-family: var(--font-cabinet);
+  font-family: var(--font-label);
   overflow: hidden;
 }
 
+/* the 16px gutters the viewport-edge bulb strips live in. */
+#root {
+  padding: 16px 0;
+}
+
+/* ─── viewport-edge bulb strips ──────────────────────────────────────── */
+
+/* toned down at rest: mostly-unlit brass with one dim roamer, slow whole-bulb
+   steps. framing, not a show — the show is the surge ring around the sim. */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 16px;
+  z-index: 50;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 4px,
+      rgba(255, 232, 154, 0.28) 4px 12px,
+      transparent 12px 96px
+    ),
+    repeating-linear-gradient(90deg, var(--black) 0 4px, var(--brass) 4px 12px, var(--black) 12px 16px);
+  animation: mq-chase 2.4s steps(6) infinite;
+}
+
+body::before {
+  top: 0;
+}
+
+body::after {
+  bottom: 0;
+}
+
+@keyframes mq-chase {
+  to { background-position: 96px 0, 0 0; }
+}
+
+/* the whole room wakes up while a surge is live: the strips brighten to full
+   bulbs and chase at show speed, in sync with the ring around the sim frame. */
+body:has(.stage.frenzy)::before,
+body:has(.stage.frenzy)::after {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 4px,
+      var(--bulb) 4px 12px,
+      transparent 12px 48px
+    ),
+    repeating-linear-gradient(90deg, var(--black) 0 4px, var(--brass-lit) 4px 12px, var(--black) 12px 16px);
+  animation: mq-chase-live 0.75s steps(3) infinite;
+}
+
+@keyframes mq-chase-live {
+  to { background-position: 48px 0, 0 0; }
+}
+
 .layout {
+  position: relative;
   display: flex;
   height: 100%;
+}
+
+/* the gold rope down the seam where the cabinet meets the screen. it lives on
+   the layout, not on the panel, so it stays put when a tall shop list scrolls. */
+.layout::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 294px;
+  width: 8px;
+  z-index: 4;
+  pointer-events: none;
+  background: repeating-linear-gradient(180deg, var(--gold) 0 8px, var(--gold-deep) 8px 16px);
+}
+
+/* ─── the hanging sign ───────────────────────────────────────────────── */
+
+/* the house name over the screen: black plate, stepped double gold border,
+   hard drop shadow. permanent, never animated — it is architecture. */
+.marquee-sign {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  right: 300px;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.marquee-sign span {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 1px;
+  color: var(--gold);
+  background: var(--black);
+  padding: 12px 22px;
+  border: 3px solid var(--gold-deep);
+  box-shadow:
+    0 0 0 3px var(--black),
+    0 0 0 6px var(--gold-deep),
+    6px 6px 0 rgba(0, 0, 0, 0.7);
+  text-shadow: 3px 3px 0 var(--red-deep);
 }
 
 /* ─── the machine screen ─────────────────────────────────────────────── */
@@ -62,8 +171,8 @@ body,
   overflow: hidden;
 }
 
-/* permanent cabinet-screen framing: dark vignette + a thin gold bezel line.
-   frames the crit blizzard without competing with it. */
+/* the cabinet bezel: stepped inset rings, black / gold-deep / black. hard
+   steps only — the old vignette blur is gone. */
 .stage::before {
   content: '';
   position: absolute;
@@ -71,13 +180,16 @@ body,
   z-index: 2;
   pointer-events: none;
   box-shadow:
-    inset 0 0 8px 1px rgba(0, 0, 0, 0.9),
-    inset 0 0 0 2px rgba(244, 207, 90, 0.14),
-    inset 0 0 120px 20px rgba(0, 0, 0, 0.55);
+    inset 0 0 0 3px var(--black),
+    inset 0 0 0 6px var(--gold-deep),
+    inset 0 0 0 9px var(--black);
 }
 
-/* frenzy glow overlay — sits ABOVE the pixi canvas so it actually shows
-   (the old inset shadow on .stage was painted over by the canvas child). */
+/* the surge tell (design §3): while a surge is live, a marquee bulb ring lights
+   around the whole sim frame. two dot grids offset half a tile alternate in
+   steps(1) — the classic lit/unlit marquee flip, zero easing. the mask cuts the
+   content box out so only a 16px frame paints, and the sim underneath stays
+   untinted: the physics stays the theater. */
 .stage::after {
   content: '';
   position: absolute;
@@ -85,193 +197,185 @@ body,
   z-index: 3;
   pointer-events: none;
   opacity: 0;
-  box-shadow:
-    inset 0 0 70px 6px rgba(255, 46, 70, 0.55),
-    inset 0 0 22px 2px rgba(255, 140, 60, 0.6),
-    inset 0 0 0 3px rgba(255, 90, 112, 0.7);
 }
 
 .stage.frenzy::after {
   opacity: 1;
-  animation: frenzy-glow 0.55s ease-in-out infinite alternate;
+  padding: 16px;
+  background:
+    radial-gradient(circle, var(--bulb) 0 3px, transparent 3.5px) 0 0 / 16px 16px,
+    radial-gradient(circle, var(--brass-lit) 0 3px, transparent 3.5px) 8px 8px / 16px 16px,
+    var(--black);
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: mq-surge-ring 0.5s steps(1) infinite;
 }
 
-@keyframes frenzy-glow {
-  from {
-    box-shadow:
-      inset 0 0 46px 4px rgba(255, 120, 46, 0.45),
-      inset 0 0 0 3px rgba(255, 176, 46, 0.55);
-  }
-  to {
-    box-shadow:
-      inset 0 0 110px 12px rgba(255, 46, 94, 0.7),
-      inset 0 0 0 4px rgba(255, 90, 112, 0.9);
-  }
+@keyframes mq-surge-ring {
+  50% { background-position: 8px 8px, 0 0, 0 0; }
+}
+
+/* the ignition beat: the same ring flips at double rate so the mode change
+   cannot be missed even mid-drag. */
+.stage.igniting::after {
+  animation: mq-surge-ring 0.25s steps(1) infinite;
+}
+
+/* while a brush is armed the stage is a paint surface, not a strike target */
+.stage.painting {
+  cursor: cell;
 }
 
 /* ─── the cabinet side panel (HUD) ───────────────────────────────────── */
 
+/* red felt with a subtle dark dither, a black structural seam to the screen,
+   and a static gold rope strip along the seam edge. */
 .hud {
   position: relative;
   width: 300px;
   flex: none;
-  padding: 22px 18px 16px;
+  padding: 18px 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 10px;
   background:
-    radial-gradient(120% 80% at 80% -10%, rgba(244, 207, 90, 0.06), transparent 60%),
-    linear-gradient(180deg, var(--cabinet-raised), var(--cabinet) 60%);
-  border-left: 2px solid var(--gold-shadow);
-  box-shadow: inset 12px 0 24px -14px rgba(0, 0, 0, 0.9);
+    repeating-conic-gradient(rgba(0, 0, 0, 0.18) 0% 25%, transparent 0% 50%) 0 0 / 6px 6px,
+    var(--felt);
+  border-left: 6px solid var(--black);
+  overflow-y: auto;
+  scrollbar-width: none;
 }
 
-/* the lit gold seam where the cabinet meets the screen: a bulb strip that
-   chases downward like a marquee edge. */
-.hud::before {
-  content: '';
-  position: absolute;
-  left: -2px;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  background:
-    var(--grad-gold-v),
-    radial-gradient(circle at 3px 9px, var(--bulb-lit) 1.8px, transparent 2.4px);
-  background-size: 100% 100%, 100% 22px;
-  background-repeat: no-repeat, repeat-y;
-  box-shadow: 0 0 8px rgba(255, 224, 130, 0.5);
-}
-
-.hud::after {
-  content: '';
-  position: absolute;
-  left: -2px;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  pointer-events: none;
-  background: radial-gradient(circle at 3px 9px, rgba(255, 245, 210, 0.95) 2.4px, transparent 3px);
-  background-size: 100% 22px;
-  opacity: 0.9;
-  animation: bulb-chase 1.6s linear infinite;
-}
-
-@keyframes bulb-chase {
-  from { background-position: 0 -22px; opacity: 0.25; }
-  50%  { opacity: 0.95; }
-  to   { background-position: 0 22px; opacity: 0.25; }
-}
-
-/* ─── title marquee ──────────────────────────────────────────────────── */
+/* ─── title row ──────────────────────────────────────────────────────── */
 
 .title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 2px;
+  gap: 8px;
 }
 
 .hud h1 {
-  position: relative;
   font-family: var(--font-display);
-  font-size: 27px;
-  line-height: 1;
-  letter-spacing: 2px;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 1px;
   text-transform: uppercase;
-  color: var(--gold-hi);
-  /* neon-tube glow (brief calls for neon-sign energy) */
-  text-shadow:
-    0 0 1px #fff,
-    0 0 6px rgba(255, 224, 130, 0.9),
-    0 0 14px rgba(244, 207, 90, 0.7),
-    0 0 26px rgba(255, 120, 46, 0.5),
-    0 2px 0 #7a5514;
-  animation: neon-flicker 4.5s steps(1) infinite;
+  color: var(--gold);
+  text-shadow: 2px 2px 0 var(--black);
 }
 
-.hud h1::before,
-.hud h1::after {
-  content: '\2726';
-  font-size: 13px;
-  color: var(--red-hot);
-  vertical-align: 4px;
-  text-shadow: 0 0 8px rgba(255, 46, 70, 0.9);
-  margin: 0 4px;
+/* ─── pixel keys: the shared physical-button chrome ──────────────────── */
+
+/* every button in the game is a key you can push: flat face, black border,
+   hard offset shadow, and :active translates the key into its own shadow. */
+.mute,
+.upgrades button,
+.brushes button,
+.bank-out-btn,
+.front-option,
+.node.next {
+  border: 2px solid var(--black);
+  background: linear-gradient(180deg, var(--felt-lit) 0 50%, #3a0810 50% 100%);
+  color: var(--ink);
+  font-family: var(--font-label);
+  cursor: pointer;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 215, 94, 0.25),
+    3px 3px 0 var(--black);
+  transition: none;
 }
 
-@keyframes neon-flicker {
-  0%, 92%, 100% { opacity: 1; }
-  93% { opacity: 0.55; }
-  94% { opacity: 1; }
-  96% { opacity: 0.7; }
-  97% { opacity: 1; }
+.mute:hover:not(:disabled),
+.upgrades button:hover:not(:disabled),
+.brushes button:hover:not(:disabled),
+.bank-out-btn:hover:not(:disabled),
+.front-option:hover:not(:disabled),
+.node.next:hover:not(:disabled) {
+  border-color: var(--gold-deep);
+}
+
+.mute:active,
+.upgrades button:not(:disabled):active,
+.brushes button:not(:disabled):active,
+.bank-out-btn:active,
+.front-option:not(:disabled):active,
+.node.next:not(:disabled):active {
+  transform: translate(3px, 3px);
+  box-shadow: inset 0 2px 0 rgba(255, 215, 94, 0.25);
+}
+
+.upgrades button:disabled,
+.brushes button:disabled,
+.front-option:disabled,
+.node.next:disabled {
+  cursor: default;
+  color: var(--ink-faint);
+  background: linear-gradient(180deg, #2e0910 0 50%, #1d050a 50% 100%);
+  box-shadow: 3px 3px 0 var(--black);
+}
+
+/* the hero keys: BANK, NEXT STORM, ENTER STORM — gold hard-banded fill, black
+   text, display font. this is the jackpot treatment, spent sparingly. */
+.bank-btn,
+.next-storm-btn,
+.enter-storm {
+  border: 3px solid var(--black);
+  background: repeating-linear-gradient(180deg, var(--gold) 0 4px, #e0b73e 4px 8px);
+  color: var(--black);
+  font-family: var(--font-display);
+  cursor: pointer;
+  box-shadow: 4px 4px 0 var(--black);
+  transition: none;
+}
+
+.bank-btn:active,
+.next-storm-btn:active,
+.enter-storm:active {
+  transform: translate(4px, 4px);
+  box-shadow: none;
 }
 
 .mute {
-  font-family: var(--font-num);
-  background: linear-gradient(180deg, #241d12, #140f09);
-  border: 1px solid var(--gold-shadow);
-  border-radius: 999px;
-  color: var(--ink-dim);
-  font-size: 10px;
+  font-family: var(--font-label);
+  font-size: 8px;
   letter-spacing: 1px;
   text-transform: uppercase;
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, box-shadow 0.15s;
+  color: var(--ink-dim);
+  padding: 5px 8px;
 }
 
-.mute:hover {
-  border-color: var(--gold);
-  color: var(--gold-hi);
-  box-shadow: 0 0 10px rgba(244, 207, 90, 0.3);
-}
+/* ─── money windows ──────────────────────────────────────────────────── */
 
-.mute:active {
-  transform: translateY(1px);
-}
-
-/* ─── payout window (essence) ────────────────────────────────────────── */
-
-.payout {
-  position: relative;
+/* every money readout is a seven-segment window: black inset glass, gold VT323
+   digits, letterspaced so the digits read as segments. */
+.payout,
+.pot-window,
+.results-cores {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  padding: 14px 12px 9px;
-  border-radius: 8px;
-  background:
-    radial-gradient(120% 140% at 50% 0%, rgba(28, 74, 54, 0.4), transparent 70%),
-    linear-gradient(180deg, #071711, var(--felt));
-  border: 2px solid transparent;
-  border-image: var(--grad-gold) 1;
-  box-shadow:
-    inset 0 3px 14px rgba(0, 0, 0, 0.85),
-    inset 0 0 0 1px rgba(255, 224, 130, 0.12),
-    0 1px 0 rgba(255, 242, 194, 0.15);
+  padding: 10px 12px 7px;
+  background: var(--black);
+  border: 3px solid var(--gold-deep);
+  box-shadow: inset 0 0 0 3px #000;
 }
 
 .payout-value {
   font-family: var(--font-num);
-  font-weight: 700;
-  font-size: 34px;
+  font-size: 40px;
   line-height: 1;
-  letter-spacing: -1px;
+  letter-spacing: 4px;
   font-variant-numeric: tabular-nums;
-  color: var(--gold-hi);
-  text-shadow:
-    0 0 5px rgba(255, 224, 130, 0.7),
-    0 0 16px rgba(244, 207, 90, 0.45),
-    0 2px 1px rgba(0, 0, 0, 0.8);
+  color: var(--gold);
 }
 
-.payout-label {
-  font-size: 10px;
-  letter-spacing: 4px;
+.payout-label,
+.pot-label {
+  font-size: 8px;
+  letter-spacing: 3px;
   text-transform: uppercase;
-  color: var(--ink-dim);
+  color: var(--gold-deep);
 }
 
 /* ─── dps + stat chips ───────────────────────────────────────────────── */
@@ -280,23 +384,22 @@ body,
   display: flex;
   align-items: baseline;
   justify-content: center;
-  gap: 7px;
-  font-family: var(--font-num);
-  margin-top: -1px;
+  gap: 6px;
 }
 
 .dps .stat-val {
-  color: var(--ink);
-  font-weight: 700;
+  font-family: var(--font-num);
+  font-size: 20px;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
-  font-size: 14px;
+  color: var(--gold);
 }
 
 .dps .stat-key {
-  color: var(--ink-faint);
-  font-size: 10px;
-  letter-spacing: 2px;
+  font-size: 8px;
+  letter-spacing: 1px;
   text-transform: uppercase;
+  color: var(--ink-faint);
 }
 
 .statgrid {
@@ -310,44 +413,36 @@ body,
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  padding: 6px 4px;
-  border-radius: 6px;
-  background: linear-gradient(180deg, #211a10, #100c07);
-  border: 1px solid #3a2e18;
-  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.06);
+  padding: 5px 4px 3px;
+  background: var(--black);
+  border: 2px solid var(--gold-deep);
 }
 
 .chip-k {
-  font-size: 9px;
-  letter-spacing: 1.5px;
+  font-size: 8px;
+  letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--ink-faint);
 }
 
 .chip-v {
   font-family: var(--font-num);
-  font-weight: 700;
+  font-size: 17px;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  color: var(--ink);
+  color: var(--gold);
 }
 
 .chip.gold {
-  border-color: var(--gold-shadow);
-  background: linear-gradient(180deg, #2a2110, #140d05);
+  border-color: var(--gold);
 }
 
-.chip.gold .chip-v {
-  color: var(--gold);
-  text-shadow: 0 0 8px rgba(244, 207, 90, 0.4);
-}
-
-/* ─── heat gauge ─────────────────────────────────────────────────────── */
+/* ─── meters: black track, gold-deep frame, hard 8px/2px bands ───────── */
 
 .heat {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   margin-top: 2px;
 }
 
@@ -355,186 +450,121 @@ body,
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-family: var(--font-num);
-  font-size: 12px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
   color: var(--ink-dim);
 }
 
 .heat-label > span:first-child {
-  font-weight: 700;
-  color: var(--red-hot);
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-num);
+  font-size: 18px;
+  line-height: 1;
+  letter-spacing: 1px;
+  text-transform: none;
+  color: var(--red);
 }
 
 .heat-hint {
   color: var(--ink-faint);
-  font-size: 10px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
 }
 
 .heat-bar,
-.rank-bar {
+.rank-bar,
+.core-bar {
   position: relative;
-  height: 12px;
-  border-radius: 7px;
-  background: #0a0704;
-  border: 1px solid #3a2e18;
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.9);
+  height: 14px;
+  background: var(--black);
+  border: 2px solid var(--gold-deep);
   overflow: hidden;
 }
 
-/* segmented gauge ticks laid over the fill so it reads as a meter */
-.heat-bar::after,
-.rank-bar::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image: repeating-linear-gradient(
-    90deg,
-    transparent 0,
-    transparent 13px,
-    rgba(0, 0, 0, 0.55) 13px,
-    rgba(0, 0, 0, 0.55) 15px
-  );
-}
-
-.heat-fill {
-  height: 100%;
-  width: 100%;
-  transform-origin: left;
-  transition: transform 0.1s linear;
-  background: linear-gradient(90deg, #ff8a2e, var(--red) 70%, var(--red-hot));
-  box-shadow: 0 0 12px rgba(255, 46, 70, 0.6);
-}
-
+.heat-fill,
 .rank-fill {
   height: 100%;
   width: 100%;
   transform-origin: left;
-  transition: transform 0.2s;
-  background: linear-gradient(90deg, #cf9f34, var(--gold) 60%, var(--gold-hi));
-  box-shadow: 0 0 12px rgba(244, 207, 90, 0.5);
+  transition: transform 0.1s linear;
+  background: repeating-linear-gradient(90deg, var(--gold) 0 8px, var(--gold-deep) 8px 10px);
+}
+
+.rank-fill {
+  transition: transform 0.2s linear;
 }
 
 /* ─── surge panel (the mode change made unmissable, design §3) ────────── */
 
-/* a live surge swaps the calm heat meter for a whole red-hot marquee panel:
-   a real mode flip, casino-loud (pillar 4), not a subtle status line. */
+/* a live surge swaps the calm heat meter for a whole marquee panel: gold frame
+   stepped out over a danger-red ring, no blur, no throb — the motion budget for
+   the surge is spent on the bulb ring around the sim. */
 .surge-panel {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 8px;
   margin-top: 2px;
-  padding: 11px 11px 12px;
-  border-radius: 9px;
-  background:
-    repeating-linear-gradient(45deg, rgba(255, 46, 70, 0.16) 0 10px, rgba(255, 138, 46, 0.16) 10px 20px),
-    linear-gradient(180deg, #1c0a0c, #120708);
-  border: 2px solid var(--red);
+  padding: 10px;
+  background: var(--black);
+  border: 3px solid var(--gold);
   box-shadow:
-    0 0 18px rgba(255, 46, 70, 0.5),
-    inset 0 0 12px rgba(255, 138, 46, 0.3);
-  animation: surge-throb 0.5s ease-in-out infinite alternate;
+    0 0 0 3px var(--black),
+    0 0 0 6px var(--red);
 }
 
-@keyframes surge-throb {
-  from { box-shadow: 0 0 12px rgba(255, 46, 70, 0.4), inset 0 0 9px rgba(255, 138, 46, 0.22); }
-  to   { box-shadow: 0 0 26px rgba(255, 46, 70, 0.75), inset 0 0 16px rgba(255, 138, 46, 0.48); }
-}
-
-/* the ignition beat: a hard flash the instant a surge lights, so the mode
-   change cannot be missed even mid-drag. */
+/* the ignition beat: a hard black/gold frame flip the instant a surge lights. */
 .surge-panel.igniting {
-  animation: surge-ignite 0.3s steps(1) 4;
+  animation: surge-ignite 0.25s steps(1) 4;
 }
 
 @keyframes surge-ignite {
-  0%   { border-color: #fff; box-shadow: 0 0 40px rgba(255, 240, 200, 0.95), inset 0 0 26px rgba(255, 200, 120, 0.8); }
-  100% { border-color: var(--red); box-shadow: 0 0 18px rgba(255, 46, 70, 0.5), inset 0 0 12px rgba(255, 138, 46, 0.3); }
-}
-
-/* the stage frame gets the same one-shot flash on ignition (see .stage.frenzy). */
-.stage.igniting::after {
-  animation: stage-ignite 0.3s steps(1) 4;
-}
-
-@keyframes stage-ignite {
-  0%   { opacity: 1; box-shadow: inset 0 0 140px 24px rgba(255, 240, 200, 0.85), inset 0 0 0 5px rgba(255, 255, 255, 0.9); }
-  100% { opacity: 1; box-shadow: inset 0 0 70px 6px rgba(255, 46, 70, 0.55), inset 0 0 0 3px rgba(255, 90, 112, 0.7); }
+  0% { border-color: var(--bulb); box-shadow: 0 0 0 3px var(--black), 0 0 0 6px var(--bulb); }
+  50% { border-color: var(--gold); box-shadow: 0 0 0 3px var(--black), 0 0 0 6px var(--red); }
 }
 
 .surge-banner {
   display: flex;
   align-items: baseline;
-  gap: 9px;
+  gap: 8px;
 }
 
 .surge-word {
   font-family: var(--font-display);
-  font-size: 19px;
-  letter-spacing: 2px;
-  color: #fff;
-  text-shadow: 0 0 8px rgba(255, 46, 70, 0.95), 0 0 16px rgba(255, 138, 46, 0.7);
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: var(--gold);
+  text-shadow: 2px 2px 0 var(--red-deep);
 }
 
 .surge-mult {
   font-family: var(--font-num);
-  font-weight: 700;
-  font-size: 18px;
-  color: var(--gold-hi);
-  text-shadow: 0 0 8px rgba(244, 207, 90, 0.7);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--bulb);
 }
 
 .surge-feed {
   margin-left: auto;
   align-self: center;
-  font-size: 9px;
+  font-size: 8px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--ink-dim);
 }
 
-/* the pot itself: a big money window, its value replaying a land-bump on every
-   captured strike (keyed remount in the JSX) so each strike visibly goes SOMEWHERE. */
-.pot-window {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  padding: 8px 10px 7px;
-  border-radius: 7px;
-  background:
-    radial-gradient(120% 140% at 50% 0%, rgba(244, 207, 90, 0.14), transparent 70%),
-    linear-gradient(180deg, #1a1204, #0d0904);
-  border: 2px solid transparent;
-  border-image: var(--grad-gold) 1;
-  box-shadow: inset 0 3px 14px rgba(0, 0, 0, 0.85);
-}
-
+/* the pot: a money window whose value replays a one-step land flash on every
+   captured strike (keyed remount in the JSX) so each strike goes SOMEWHERE. */
 .pot-value {
   font-family: var(--font-num);
-  font-weight: 700;
-  font-size: 30px;
+  font-size: 46px;
   line-height: 1;
-  letter-spacing: -1px;
+  letter-spacing: 3px;
   font-variant-numeric: tabular-nums;
-  color: var(--gold-hi);
-  text-shadow: 0 0 6px rgba(255, 224, 130, 0.7), 0 0 16px rgba(244, 207, 90, 0.45);
-  animation: pot-land 0.22s ease-out;
+  color: var(--gold);
+  animation: pot-land 0.16s steps(1);
 }
 
 @keyframes pot-land {
-  0%   { transform: scale(1.28); color: #fff; text-shadow: 0 0 14px rgba(255, 255, 255, 0.9); }
-  100% { transform: scale(1); }
-}
-
-.pot-label {
-  font-size: 9px;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  color: var(--ink-dim);
+  0% { color: var(--bulb); }
+  100% { color: var(--gold); }
 }
 
 /* ─── core temp gauge (the instrument, design §3) ────────────────────── */
@@ -542,149 +572,158 @@ body,
 .core-gauge {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .core-gauge-label {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-family: var(--font-num);
-  font-size: 11px;
+  font-size: 8px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--ink-faint);
 }
 
 .core-room {
-  font-weight: 700;
-  color: var(--gold);
+  font-family: var(--font-num);
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 1px;
   text-transform: none;
-  letter-spacing: 0;
+  color: var(--gold);
 }
 
+/* out of headroom: the readout blinks in hard steps, no fade. */
 .core-room.hot {
-  color: var(--red-hot);
-  animation: surge-throb 0.5s ease-in-out infinite alternate;
+  color: var(--red);
+  animation: hot-blink 0.5s steps(1) infinite;
 }
 
-.core-bar {
-  position: relative;
-  height: 14px;
-  border-radius: 7px;
-  background: #0a0704;
-  border: 1px solid #3a2e18;
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.9);
-  overflow: hidden;
+@keyframes hot-blink {
+  50% { color: var(--bulb); }
 }
 
+/* the core fill is the one meter that runs danger red — it measures the risk. */
 .core-fill {
   height: 100%;
   width: 100%;
   transform-origin: left;
   transition: transform 0.1s linear;
-  background: linear-gradient(90deg, #ffcf46 0%, #ff8a2e 45%, var(--red) 80%, var(--red-hot));
-  box-shadow: 0 0 12px rgba(255, 90, 60, 0.6);
+  background: repeating-linear-gradient(90deg, var(--red) 0 8px, var(--red-deep) 8px 10px);
 }
 
 /* the two threshold ticks: past a tick, a spike of that size no longer fits.
-   the pure helper places them; the marker just paints where it says. */
+   they are a gameplay instrument, so they stay the brightest thing in the
+   track — hard cream/white posts with a black outline, readable over red. */
 .core-tick {
   position: absolute;
   top: -2px;
   bottom: -2px;
-  width: 2px;
-  transform: translateX(-1px);
+  width: 4px;
+  transform: translateX(-2px);
   pointer-events: none;
+  z-index: 1;
 }
 
 .core-tick.median {
-  background: var(--gold-hi);
-  box-shadow: 0 0 6px rgba(255, 242, 194, 0.9);
+  background: var(--gold);
+  box-shadow: inset 1px 0 0 var(--black), inset -1px 0 0 var(--black);
 }
 
 .core-tick.max {
-  background: #fff;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+  background: var(--bulb);
+  box-shadow: inset 1px 0 0 var(--black), inset -1px 0 0 var(--black);
 }
 
 /* a tick the core has already climbed past reads spent — its crit now busts. */
 .core-tick.passed {
   background: var(--red-deep);
-  box-shadow: none;
-  opacity: 0.7;
+  box-shadow: inset 1px 0 0 var(--black), inset -1px 0 0 var(--black);
 }
 
 .core-legend {
   display: flex;
   justify-content: space-between;
-  font-family: var(--font-num);
-  font-size: 10px;
-  letter-spacing: 0.5px;
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
   color: var(--ink-dim);
 }
 
 .core-legend .off {
-  color: var(--red-hot);
+  color: var(--red);
 }
 
-/* ─── BANK button (the action of the game, design §3) ────────────────── */
+/* ─── BANK (the action of the game, design §3) ───────────────────────── */
 
 .bank-btn {
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 2px solid var(--gold-hi);
-  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
-  color: #1a0a00;
-  font-family: var(--font-display);
-  font-size: 13px;
+  padding: 8px 12px;
+  font-size: 12px;
   letter-spacing: 1px;
-  cursor: pointer;
-  box-shadow: 0 0 12px rgba(244, 207, 90, 0.6);
 }
 
 /* the wide, primary form inside the surge panel: reads as THE move, and states
    what banking now pays (pot × multiplier = the pot value). */
 .bank-btn.wide {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 9px 12px;
-  font-size: 16px;
-  animation: bank-pulse 1s ease-in-out infinite alternate;
+  padding: 11px 12px;
+  animation: hero-blink 0.6s steps(1) infinite;
+}
+
+/* the hero keys blink their border between black and bulb — a marquee key, not
+   a glow. */
+@keyframes hero-blink {
+  50% { border-color: var(--bulb); }
 }
 
 .bank-word {
+  font-size: 15px;
   letter-spacing: 2px;
 }
 
 .bank-take {
   font-family: var(--font-num);
-  font-weight: 700;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: 1px;
   font-variant-numeric: tabular-nums;
-  font-size: 17px;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
-}
-
-@keyframes bank-pulse {
-  from { box-shadow: 0 0 10px rgba(244, 207, 90, 0.5); }
-  to   { box-shadow: 0 0 22px rgba(255, 242, 194, 0.85); }
 }
 
 .bank-btn em {
   font-style: normal;
-  font-size: 10px;
-  opacity: 0.7;
+  font-family: var(--font-label);
+  font-size: 8px;
 }
 
-.bank-btn:hover {
-  filter: brightness(1.1);
+/* the between-surges voluntary exit: a gold-outlined key rather than a gold
+   jackpot key, so leaving the storm stays a considered move next to BANK
+   (design §2), while still reading as the same physical hardware. */
+.bank-out-btn {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--black);
+  border: 3px solid var(--gold-deep);
+  color: var(--gold);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 1px;
+  box-shadow: 3px 3px 0 var(--black);
 }
 
-.bank-btn:active {
-  transform: translateY(1px);
+.bank-out-btn:hover {
+  border-color: var(--gold);
+}
+
+.bank-out-btn em {
+  font-style: normal;
+  font-family: var(--font-label);
+  font-size: 8px;
+  color: var(--ink-dim);
 }
 
 /* ─── rank ───────────────────────────────────────────────────────────── */
@@ -692,22 +731,22 @@ body,
 .rank {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   margin-top: 2px;
 }
 
 .rank-label {
-  font-family: var(--font-num);
-  font-size: 12px;
+  font-size: 9px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--ink-faint);
 }
 
 .rank-label strong {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 1px;
   color: var(--gold);
-  letter-spacing: 2px;
-  text-shadow: 0 0 8px rgba(244, 207, 90, 0.4);
 }
 
 .rank-next {
@@ -715,143 +754,16 @@ body,
   text-transform: none;
 }
 
-/* ─── upgrade buttons (cabinet betting chips) ────────────────────────── */
+/* ─── shop rows: upgrades, brushes, structures ───────────────────────── */
 
 .upgrades {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 7px;
+  margin-top: 6px;
 }
 
-.upgrades button {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    'name cost'
-    'desc cost';
-  align-items: center;
-  column-gap: 10px;
-  padding: 9px 11px;
-  border: 1px solid #4a3a1c;
-  border-radius: 9px;
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-  font-family: var(--font-cabinet);
-  background:
-    linear-gradient(180deg, rgba(255, 242, 194, 0.06), transparent 40%),
-    linear-gradient(180deg, #241c10, #130d06);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 242, 194, 0.12),
-    0 2px 0 #050302,
-    0 3px 6px rgba(0, 0, 0, 0.6);
-  transition: transform 0.08s, border-color 0.15s, box-shadow 0.15s, filter 0.15s;
-}
-
-.upgrades button:hover:not(:disabled) {
-  border-color: var(--gold);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 242, 194, 0.2),
-    0 2px 0 #050302,
-    0 0 14px rgba(244, 207, 90, 0.35);
-}
-
-.upgrades button:active:not(:disabled) {
-  transform: translateY(2px);
-  box-shadow:
-    inset 0 2px 6px rgba(0, 0, 0, 0.6),
-    0 0 10px rgba(244, 207, 90, 0.3);
-}
-
-.upgrades button:disabled {
-  cursor: default;
-  filter: grayscale(0.6) brightness(0.62);
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55);
-}
-
-.upgrades button.bought {
-  animation: bought-pulse 0.35s ease-out;
-}
-
-@keyframes bought-pulse {
-  0% {
-    transform: scale(1);
-    border-color: var(--gold-hi);
-    box-shadow: 0 0 0 rgba(255, 224, 130, 0);
-  }
-  35% {
-    transform: scale(1.04);
-    border-color: var(--gold-hi);
-    box-shadow: 0 0 22px rgba(255, 224, 130, 0.7);
-  }
-  100% {
-    transform: scale(1);
-    border-color: #4a3a1c;
-    box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.12), 0 2px 0 #050302;
-  }
-}
-
-.upgrade-name {
-  grid-area: name;
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--ink);
-  letter-spacing: 0.3px;
-}
-
-.upgrade-name em {
-  font-style: normal;
-  color: var(--ink-faint);
-  font-weight: 400;
-  font-family: var(--font-num);
-  font-size: 11px;
-}
-
-.upgrade-desc {
-  grid-area: desc;
-  color: var(--ink-dim);
-  font-size: 11px;
-}
-
-/* the price reads as a stamped gold chip */
-.upgrade-cost {
-  grid-area: cost;
-  align-self: center;
-  font-family: var(--font-num);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: #2a1d05;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: var(--grad-gold);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(0, 0, 0, 0.5);
-}
-
-button:disabled .upgrade-cost {
-  background: linear-gradient(180deg, #4a4230, #2c2618);
-  color: #8f815e;
-  box-shadow: none;
-}
-
-/* ─── defense brushes ────────────────────────────────────────────────── */
-
-.brushes {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.brushes-label {
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-
-/* brushes reuse the upgrade button chrome so the shop reads as one system */
+.upgrades button,
 .brushes button {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -860,47 +772,81 @@ button:disabled .upgrade-cost {
     'desc cost';
   align-items: center;
   column-gap: 10px;
-  padding: 9px 11px;
-  border: 1px solid #2c4a52;
-  border-radius: 9px;
-  color: var(--ink);
+  padding: 8px 10px;
   text-align: left;
-  cursor: pointer;
-  font-family: var(--font-cabinet);
-  background:
-    linear-gradient(180deg, rgba(194, 236, 255, 0.06), transparent 40%),
-    linear-gradient(180deg, #101f24, #06111a);
-  box-shadow:
-    inset 0 1px 0 rgba(194, 236, 255, 0.12),
-    0 2px 0 #050302,
-    0 3px 6px rgba(0, 0, 0, 0.6);
-  transition: transform 0.08s, border-color 0.15s, box-shadow 0.15s, filter 0.15s;
 }
 
-.brushes button:hover:not(:disabled) {
-  border-color: #6fd0e6;
-  box-shadow:
-    inset 0 1px 0 rgba(194, 236, 255, 0.2),
-    0 2px 0 #050302,
-    0 0 14px rgba(111, 208, 230, 0.35);
+.upgrades button.bought {
+  animation: bought-flash 0.12s steps(1) 3;
 }
 
+@keyframes bought-flash {
+  0% { border-color: var(--gold); background: var(--gold-dim); }
+  100% { border-color: var(--black); }
+}
+
+.upgrade-name {
+  grid-area: name;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: var(--ink);
+}
+
+.upgrade-name em {
+  font-style: normal;
+  font-family: var(--font-num);
+  font-size: 15px;
+  color: var(--gold-deep);
+}
+
+.upgrade-desc {
+  grid-area: desc;
+  font-size: 9px;
+  color: var(--ink-dim);
+}
+
+/* the price is a stamped gold plate — money is gold and numerals are VT323. */
+.upgrade-cost {
+  grid-area: cost;
+  align-self: center;
+  font-family: var(--font-num);
+  font-size: 18px;
+  line-height: 1.15;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  color: var(--black);
+  padding: 2px 7px;
+  background: var(--gold);
+  border: 2px solid var(--black);
+}
+
+/* an unaffordable price is a dimmed plate, still black-on-gold so the number
+   stays readable — the cost is information, not decoration. */
+button:disabled .upgrade-cost {
+  background: var(--gold-dim);
+  color: var(--black);
+}
+
+/* ─── defense brushes + structures ───────────────────────────────────── */
+
+.brushes {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.brushes-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* an armed brush is the one lit key on the panel. */
 .brushes button.selected {
-  border-color: #6fd0e6;
-  box-shadow:
-    inset 0 1px 0 rgba(194, 236, 255, 0.25),
-    0 0 16px rgba(111, 208, 230, 0.55);
-}
-
-.brushes button:disabled {
-  cursor: default;
-  filter: grayscale(0.6) brightness(0.62);
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55);
-}
-
-/* while a brush is armed the stage is a paint surface, not a strike target */
-.stage.painting {
-  cursor: cell;
+  border-color: var(--gold);
+  background: linear-gradient(180deg, #7a1620 0 50%, #4a0c14 50% 100%);
 }
 
 /* ─── hint ───────────────────────────────────────────────────────────── */
@@ -908,7 +854,8 @@ button:disabled .upgrade-cost {
 .hint {
   margin-top: auto;
   padding-top: 6px;
-  font-size: 11px;
+  font-size: 8px;
+  line-height: 1.6;
   letter-spacing: 0.5px;
   color: var(--ink-faint);
   text-align: center;
@@ -916,96 +863,103 @@ button:disabled .upgrade-cost {
 
 /* ─── storm results (design §5 — the quit-while-ahead lesson) ────────── */
 
+/* the payout moment on the casino floor: a felt panel under the house lights,
+   the cores value in a seven-segment window, one hero key out. */
 .results {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
-  background:
-    radial-gradient(circle at 50% 35%, rgba(244, 207, 90, 0.06), transparent 60%),
-    var(--cabinet);
+  background: var(--black);
 }
 
 .results-panel {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
-  width: min(420px, 92vw);
-  padding: 28px 32px 32px;
-  border: 2px solid var(--gold-shadow);
-  border-radius: 10px;
-  background: linear-gradient(180deg, var(--cabinet-raised), var(--cabinet) 70%);
-  box-shadow: 0 0 40px rgba(244, 207, 90, 0.12);
+  gap: 16px;
+  width: min(440px, 92vw);
+  padding: 26px 28px 28px;
+  background:
+    repeating-conic-gradient(rgba(0, 0, 0, 0.18) 0% 25%, transparent 0% 50%) 0 0 / 6px 6px,
+    var(--felt);
+  border: 3px solid var(--gold-deep);
+  box-shadow:
+    0 0 0 3px var(--black),
+    0 0 0 6px var(--gold-deep),
+    8px 8px 0 rgba(0, 0, 0, 0.7);
 }
 
+/* a blow-up wears the danger accent instead of the gold trim. */
 .results-panel.bust {
   border-color: var(--red-deep);
-  box-shadow: 0 0 40px rgba(255, 46, 70, 0.12);
+  box-shadow:
+    0 0 0 3px var(--black),
+    0 0 0 6px var(--red-deep),
+    8px 8px 0 rgba(0, 0, 0, 0.7);
 }
 
 .results-title {
-  margin: 0;
   font-family: var(--font-display);
-  font-size: 34px;
-  letter-spacing: 4px;
-  color: var(--gold-hi);
-  text-shadow: 0 0 18px rgba(244, 207, 90, 0.55);
+  font-size: 22px;
+  letter-spacing: 2px;
+  color: var(--gold);
+  text-shadow: 3px 3px 0 var(--black);
 }
 
 .results-title.bust {
-  color: var(--red-hot);
-  text-shadow: 0 0 18px rgba(255, 46, 70, 0.55);
+  color: var(--red);
 }
 
 .results-lesson {
-  margin: 0;
-  font-size: 12px;
+  font-size: 9px;
+  line-height: 1.7;
   letter-spacing: 0.5px;
   color: var(--ink-dim);
   text-align: center;
 }
 
-/* the headline payout: cores are the storm's permanent yield, so they get the
-   payout treatment — big tabular number, the bonus math spelled out under it */
 .results-cores {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 12px 26px;
-  border: 1px solid var(--gold-shadow);
-  border-radius: 8px;
-  background: rgba(244, 207, 90, 0.05);
+  padding: 12px 26px 8px;
+}
+
+.results-panel.bust .results-cores {
+  border-color: var(--red-deep);
 }
 
 .results-cores-value {
   font-family: var(--font-num);
-  font-weight: 700;
+  font-size: 44px;
+  line-height: 1;
+  letter-spacing: 4px;
   font-variant-numeric: tabular-nums;
-  font-size: 34px;
   color: var(--gold);
-  text-shadow: 0 0 14px rgba(244, 207, 90, 0.45);
+}
+
+.results-panel.bust .results-cores-value {
+  color: var(--red);
 }
 
 .results-cores-label {
-  font-size: 11px;
-  letter-spacing: 2px;
+  font-size: 8px;
+  letter-spacing: 3px;
   text-transform: uppercase;
-  color: var(--ink-dim);
+  color: var(--gold-deep);
 }
 
 .results-cores-detail {
-  margin-top: 4px;
+  margin-top: 5px;
+  text-align: center;
   font-family: var(--font-num);
-  font-size: 11px;
+  font-size: 15px;
+  letter-spacing: 1px;
   color: var(--ink-faint);
 }
 
 .results-grid {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
   width: 100%;
 }
 
@@ -1014,10 +968,12 @@ button:disabled .upgrade-cost {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+  padding-bottom: 4px;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.35);
 }
 
 .results-key {
-  font-size: 11px;
+  font-size: 9px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -1025,135 +981,39 @@ button:disabled .upgrade-cost {
 
 .results-val {
   font-family: var(--font-num);
-  font-weight: 700;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: 1px;
   font-variant-numeric: tabular-nums;
-  font-size: 14px;
-  color: var(--ink);
+  color: var(--gold);
 }
 
 .results-val.loss {
-  color: var(--red-hot);
+  color: var(--red);
 }
 
-/* the only action on the screen: same primary treatment as the in-surge BANK */
 .next-storm-btn {
   width: 100%;
-  padding: 10px 12px;
-  border-radius: 6px;
-  border: 2px solid var(--gold-hi);
-  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
-  color: #1a0a00;
-  font-family: var(--font-display);
-  font-size: 15px;
+  padding: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
-  cursor: pointer;
-  box-shadow: 0 0 12px rgba(244, 207, 90, 0.6);
-}
-
-.next-storm-btn:hover {
-  filter: brightness(1.1);
-}
-
-.next-storm-btn:active {
-  transform: translateY(1px);
-}
-
-/* the between-surges voluntary exit: quiet next to the loud in-surge BANK, but
-   always present so ending on your terms is a standing option (design §2) */
-.bank-out-btn {
-  margin-top: 6px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--gold-shadow);
-  background: transparent;
-  color: var(--ink-dim);
-  font-family: var(--font-display);
-  font-size: 11px;
-  letter-spacing: 1px;
-  cursor: pointer;
-}
-
-.bank-out-btn:hover {
-  border-color: var(--gold);
-  color: var(--gold);
-}
-
-.bank-out-btn em {
-  font-style: normal;
-  font-size: 10px;
-  color: var(--ink-faint);
-}
-
-/* ─── reduced motion ─────────────────────────────────────────────────── */
-
-@media (prefers-reduced-motion: reduce) {
-  .stage.frenzy::after,
-  .stage.igniting::after,
-  .hud h1,
-  .hud::after,
-  .surge-panel,
-  .surge-panel.igniting,
-  .core-room.hot,
-  .pot-value,
-  .bank-btn.wide {
-    animation: none !important;
-  }
-  .hud::after { opacity: 0.7; }
-  .stage.frenzy::after { opacity: 1; }
-}
-
-/* ─── bank out (leave the storm, design §5) ──────────────────────────── */
-
-/* deliberately quiet next to BANK: leaving the storm is a considered exit,
-   not the moment-to-moment action, so it reads as cabinet trim, not a jackpot. */
-.bank-out {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--gold-shadow);
-  background: linear-gradient(180deg, #1c1509, #0f0a05);
-  color: var(--gold);
-  font-family: var(--font-display);
-  font-size: 12px;
-  letter-spacing: 1.5px;
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.1), 0 2px 0 #050302;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.bank-out:hover {
-  border-color: var(--gold);
-  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.18), 0 0 12px rgba(244, 207, 90, 0.3);
-}
-
-.bank-out:active {
-  transform: translateY(1px);
-}
-
-.bank-out-hint {
-  font-family: var(--font-num);
-  font-size: 10px;
-  letter-spacing: 0.5px;
-  color: var(--ink-dim);
+  animation: hero-blink 0.6s steps(1) infinite;
 }
 
 /* ─── the workshop (between storms, design §5) ───────────────────────── */
 
-/* full-screen cabinet back-room: same locked dark casino skin, four track
-   ladders side by side under the gold trim. */
+/* the back room of the same house: felt floor, gold trim, four ladders of keys
+   under the house name. */
 .workshop {
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 26px clamp(18px, 4vw, 56px) 22px;
+  gap: 12px;
+  padding: 20px clamp(16px, 4vw, 48px) 18px;
   overflow: hidden;
   background:
-    radial-gradient(90% 60% at 50% -10%, rgba(244, 207, 90, 0.08), transparent 60%),
-    linear-gradient(180deg, var(--cabinet-raised), var(--cabinet) 55%);
+    repeating-conic-gradient(rgba(0, 0, 0, 0.18) 0% 25%, transparent 0% 50%) 0 0 / 6px 6px,
+    var(--felt);
 }
 
 .workshop-head {
@@ -1164,24 +1024,26 @@ button:disabled .upgrade-cost {
 
 .workshop-head h1 {
   font-family: var(--font-display);
-  font-size: 30px;
-  line-height: 1;
+  font-size: 18px;
+  line-height: 1.2;
   letter-spacing: 2px;
   text-transform: uppercase;
-  color: var(--gold-hi);
-  text-shadow:
-    0 0 1px #fff,
-    0 0 6px rgba(255, 224, 130, 0.9),
-    0 0 14px rgba(244, 207, 90, 0.7),
-    0 2px 0 #7a5514;
+  color: var(--gold);
+  background: var(--black);
+  padding: 10px 16px;
+  border: 3px solid var(--gold-deep);
+  box-shadow:
+    0 0 0 3px var(--black),
+    0 0 0 6px var(--gold-deep),
+    5px 5px 0 rgba(0, 0, 0, 0.7);
+  text-shadow: 3px 3px 0 var(--red-deep);
 }
 
 .workshop-sub {
-  font-family: var(--font-num);
-  font-size: 12px;
+  font-size: 9px;
   letter-spacing: 1px;
-  color: var(--ink-dim);
   text-transform: uppercase;
+  color: var(--ink-dim);
 }
 
 /* the storm that just ended: its yield stamped like a payout receipt */
@@ -1189,42 +1051,63 @@ button:disabled .upgrade-cost {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--gold-shadow);
-  background: linear-gradient(180deg, rgba(244, 207, 90, 0.1), rgba(244, 207, 90, 0.03));
+  padding: 7px 12px;
   width: fit-content;
+  background: var(--black);
+  border: 2px solid var(--gold-deep);
 }
 
 .yield-reason {
   font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: 1.5px;
-  color: var(--gold-hi);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--gold);
 }
 
 .yield-detail {
   font-family: var(--font-num);
-  font-size: 12px;
+  font-size: 16px;
+  letter-spacing: 1px;
   color: var(--ink-dim);
 }
 
-/* the wallet: the big number of the room */
+/* the wallet: the big money window of the room */
 .core-wallet {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
+  padding: 8px 14px 5px;
+  width: fit-content;
+  background: var(--black);
+  border: 3px solid var(--gold-deep);
+  box-shadow: inset 0 0 0 3px #000;
 }
 
-/* session-only arena picker: the locked Bog remains visible so the Front ladder
+.wallet-value {
+  font-family: var(--font-num);
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: 4px;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+}
+
+.wallet-label {
+  font-size: 8px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+}
+
+/* session-only arena picker: the locked Bog stays visible so the Front ladder
    has a clear destination without pretending higher fronts are implemented. */
 .front-picker {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding: 12px;
-  border: 1px solid #4a3a1c;
-  background: linear-gradient(180deg, rgba(244, 207, 90, 0.06), rgba(0, 0, 0, 0.12));
+  gap: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid var(--gold-deep);
 }
 
 .front-picker-head {
@@ -1235,26 +1118,27 @@ button:disabled .upgrade-cost {
 }
 
 .front-picker-head h2 {
-  margin: 0;
   font-family: var(--font-display);
-  font-size: 15px;
-  letter-spacing: 1.4px;
+  font-size: 11px;
+  letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--gold);
 }
 
 .front-picker-head p,
-.front-picker-current,
 .front-option-detail {
-  margin: 3px 0 0;
-  font-family: var(--font-num);
-  font-size: 10px;
+  margin: 4px 0 0;
+  font-size: 8px;
+  letter-spacing: 0.5px;
   color: var(--ink-dim);
 }
 
 .front-picker-current {
-  margin: 0;
+  font-family: var(--font-num);
+  font-size: 16px;
+  letter-spacing: 1px;
   white-space: nowrap;
+  color: var(--ink-dim);
 }
 
 .front-options {
@@ -1268,48 +1152,18 @@ button:disabled .upgrade-cost {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  padding: 9px 10px;
-  border: 1px solid var(--gold-shadow);
-  background: rgba(255, 242, 194, 0.05);
-  color: var(--ink);
+  padding: 8px 10px;
   text-align: left;
-  cursor: pointer;
 }
 
 .front-option.selected {
   border-color: var(--gold);
-  background: rgba(244, 207, 90, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(244, 207, 90, 0.15);
-}
-
-.front-option.locked {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.front-option:not(:disabled):hover {
-  filter: brightness(1.15);
+  background: linear-gradient(180deg, #7a1620 0 50%, #4a0c14 50% 100%);
 }
 
 .front-option-name {
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.wallet-value {
-  font-family: var(--font-num);
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  font-size: 34px;
-  color: var(--gold);
-  text-shadow: 0 0 14px rgba(244, 207, 90, 0.55), 0 2px 0 #593f0d;
-}
-
-.wallet-label {
-  font-size: 12px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--ink-dim);
+  font-size: 11px;
+  letter-spacing: 0.5px;
 }
 
 /* four ladders side by side; each column scrolls its own nodes */
@@ -1318,19 +1172,15 @@ button:disabled .upgrade-cost {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .track {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid #4a3a1c;
-  border-radius: 10px;
-  background:
-    linear-gradient(180deg, rgba(255, 242, 194, 0.05), transparent 30%),
-    linear-gradient(180deg, #17110a, #0d0a05);
-  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.1), 0 3px 8px rgba(0, 0, 0, 0.6);
+  background: var(--black);
+  border: 3px solid var(--gold-deep);
 }
 
 .track-head {
@@ -1338,23 +1188,23 @@ button:disabled .upgrade-cost {
   grid-template-columns: 1fr auto;
   grid-template-areas: 'name count' 'desc desc';
   align-items: baseline;
-  gap: 2px 8px;
-  padding: 11px 12px 9px;
-  border-bottom: 1px solid var(--gold-shadow);
+  gap: 3px 8px;
+  padding: 10px 10px 8px;
+  border-bottom: 3px solid var(--gold-deep);
 }
 
 .track-head h2 {
   grid-area: name;
   font-family: var(--font-display);
-  font-size: 16px;
-  letter-spacing: 1.5px;
+  font-size: 10px;
+  letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--gold);
 }
 
 .track-desc {
   grid-area: desc;
-  font-size: 10px;
+  font-size: 8px;
   letter-spacing: 0.4px;
   color: var(--ink-faint);
 }
@@ -1362,7 +1212,8 @@ button:disabled .upgrade-cost {
 .track-count {
   grid-area: count;
   font-family: var(--font-num);
-  font-size: 11px;
+  font-size: 16px;
+  line-height: 1;
   color: var(--ink-dim);
 }
 
@@ -1372,8 +1223,8 @@ button:disabled .upgrade-cost {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 10px;
+  gap: 6px;
+  padding: 9px;
 }
 
 /* one ladder rung; shares the shop-row grid so the workshop reads as the same
@@ -1382,121 +1233,98 @@ button:disabled .upgrade-cost {
   display: grid;
   grid-template-columns: auto 1fr auto;
   grid-template-areas: 'pip name cost' 'pip desc cost';
-  column-gap: 8px;
+  column-gap: 7px;
   align-items: center;
-  padding: 7px 9px;
-  border-radius: 8px;
-  border: 1px solid #3a2e18;
+  padding: 6px 8px;
+  border: 2px solid var(--black);
   text-align: left;
-  font-family: var(--font-cabinet);
+  font-family: var(--font-label);
 }
 
 .node-pip {
   grid-area: pip;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--gold);
 }
 
 .node-name {
   grid-area: name;
-  font-weight: 700;
-  font-size: 12px;
-  color: var(--ink);
+  font-size: 10px;
   letter-spacing: 0.3px;
+  color: var(--ink);
 }
 
 .node-desc {
   grid-area: desc;
-  font-size: 10px;
+  font-size: 8px;
   color: var(--ink-dim);
 }
 
 .node-cost {
   grid-area: cost;
   font-family: var(--font-num);
-  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 1px;
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
   color: var(--ink-dim);
 }
 
 /* purchased rungs sit lit but settled — bought, banked, part of the machine */
 .node.owned {
-  background: linear-gradient(180deg, rgba(244, 207, 90, 0.09), rgba(244, 207, 90, 0.03));
-  border-color: var(--gold-shadow);
+  background: var(--felt-deep);
+  border-color: var(--gold-deep);
 }
 
 .node.owned .node-cost {
   color: var(--ink-faint);
 }
 
-/* the next rung is the ONE actionable purchase per track */
-.node.next {
-  cursor: pointer;
-  border: 1px solid var(--gold);
-  background:
-    linear-gradient(180deg, rgba(255, 242, 194, 0.08), transparent 40%),
-    linear-gradient(180deg, #241c10, #130d06);
-  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.14), 0 2px 0 #050302;
-  transition: transform 0.08s, box-shadow 0.15s, filter 0.15s;
-}
-
+/* the next rung is the ONE actionable purchase per track: a live key. */
 .node.next .node-cost {
-  color: #2a1d05;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: var(--grad-gold);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(0, 0, 0, 0.5);
+  color: var(--black);
+  line-height: 1.15;
+  padding: 2px 6px;
+  background: var(--gold);
+  border: 2px solid var(--black);
 }
 
-.node.next:hover:not(:disabled) {
-  box-shadow: inset 0 1px 0 rgba(255, 242, 194, 0.2), 0 0 14px rgba(244, 207, 90, 0.35);
-}
-
-.node.next:active:not(:disabled) {
-  transform: translateY(2px);
-}
-
-.node.next:disabled {
-  cursor: default;
-  filter: grayscale(0.6) brightness(0.62);
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55);
+.node.next:disabled .node-cost {
+  background: var(--gold-dim);
+  color: var(--black);
 }
 
 /* locked preview rungs: visible so the ladder has a future, but clearly inert */
 .node.locked {
-  opacity: 0.45;
+  border-color: #2a0a0f;
+  color: var(--ink-faint);
 }
 
-.node.locked .node-pip {
+.node.locked .node-pip,
+.node.locked .node-name,
+.node.locked .node-desc,
+.node.locked .node-cost {
   color: var(--ink-faint);
 }
 
 .track-complete {
   padding: 8px;
   text-align: center;
-  font-family: var(--font-num);
-  font-size: 11px;
-  letter-spacing: 1.5px;
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--gold);
 }
 
-/* the one exit: back into the storm, styled like the BANK jackpot key */
+/* the one exit: back into the storm — the biggest key in the game. */
 .enter-storm {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 12px;
-  border-radius: 8px;
-  border: 2px solid var(--gold-hi);
-  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
-  color: #1a0a00;
-  font-family: var(--font-display);
-  cursor: pointer;
-  box-shadow: 0 0 12px rgba(244, 207, 90, 0.6);
-  animation: bank-pulse 1.4s ease-in-out infinite alternate;
+  gap: 5px;
+  padding: 14px;
+  animation: hero-blink 0.6s steps(1) infinite;
 }
 
 .enter-word {
@@ -1505,22 +1333,30 @@ button:disabled .upgrade-cost {
 }
 
 .enter-hint {
-  font-family: var(--font-cabinet);
-  font-size: 10px;
+  font-family: var(--font-label);
+  font-size: 9px;
   letter-spacing: 0.5px;
-  opacity: 0.75;
 }
 
-.enter-storm:hover {
-  filter: brightness(1.1);
-}
+/* ─── reduced motion ─────────────────────────────────────────────────── */
 
-.enter-storm:active {
-  transform: translateY(1px);
-}
-
+/* every animation in this stylesheet, held on its resting frame. the surge ring
+   and the edge strips stay LIT (they are state, not decoration) — they just
+   stop chasing. */
 @media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after,
+  .stage.frenzy::after,
+  .stage.igniting::after,
+  .surge-panel.igniting,
+  .core-room.hot,
+  .pot-value,
+  .bank-btn.wide,
+  .upgrades button.bought,
+  .next-storm-btn,
   .enter-storm {
     animation: none !important;
   }
+
+  .stage.frenzy::after { opacity: 1; }
 }
