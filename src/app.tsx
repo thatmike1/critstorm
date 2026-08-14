@@ -208,6 +208,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                     settleAutoStrikerOverclock(autoStrikerRef.current, reason, pot);
                     if (reason !== "bust") return;
                     engineRef.current?.bust(pot);
+                    audioRef.current.bust();
                     // INTERIM blow-up condition (npq.2): an overheat bust while the world
                     // still holds more unbanked gold than the threshold ends the WHOLE
                     // storm, not just the surge — busting while overexposed loses it.
@@ -304,6 +305,8 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 );
             }
             audioRef.current.attack(Math.max(result.tier, 1));
+            // max-tier eruptions spray lightning (design §2) — give them the crack.
+            if (result.tier >= MAX_TIER) audioRef.current.lightning();
             if (result.golden) audioRef.current.golden();
         },
     };
@@ -433,13 +436,25 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 // core reacts in a fixed order as the core heats toward critical, so the
                 // ride reads. consumes coreLoad only; 0 while idle clears the tells.
                 engine!.applyTells(surge.active ? surge.coreLoad : 0);
+                // the surge drone tracks the same coreLoad the tells consume, so the
+                // pitch rises with the physical danger and 0 silences it between surges.
+                audioRef.current.surgeDrone(surge.active ? surge.coreLoad : 0);
                 const events = stormEventsRef.current?.tick(s.elapsed) ?? [];
+                // a lightning front cracks audibly whether or not a rod is installed;
+                // rod strikes below fire their own cracks and the engine throttle
+                // collapses the overlap into at most two per window.
+                if (events.some((event) => event.type === "lightning-front")) {
+                    audioRef.current.lightning();
+                }
                 if (sprinklerRef.current) {
                     tickSprinkler(e.simulation, sprinklerRef.current, s, dt);
                 }
                 if (lightningRodRef.current) {
                     const rodStrikes = lightningRodStrikeCount(events, true);
-                    for (let i = 0; i < rodStrikes; i++) runLightningRodStrike();
+                    for (let i = 0; i < rodStrikes; i++) {
+                        runLightningRodStrike();
+                        audioRef.current.lightning();
+                    }
                 }
                 hudTimer += dt;
                 if (hudTimer >= 0.1) {
@@ -479,6 +494,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         return () => {
             cancelled = true;
             cancelAnimationFrame(raf);
+            // the drone is the one continuous voice — kill it with the storm so it
+            // can never play over the results screen or the next mount.
+            audioRef.current.surgeDrone(0);
             lifecycleRef.current.detach();
             stormEventsRef.current = null;
             engine?.destroy();
