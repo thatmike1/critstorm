@@ -88,6 +88,13 @@ import {
 import { loadWorkshopProfile, saveWorkshopProfile } from "./game/workshop-storage";
 import { ProfileStore } from "./game/persistence";
 import { WorkshopView } from "./workshop-view";
+// PROTOTYPE (sh8 art direction): ?skin= flips the storm HUD between three
+// pixel-native casino skins. throwaway — remove with prototype-skin-switcher.tsx.
+import {
+    PrototypeSkinSwitcher,
+    readPrototypeSkin,
+    type PrototypeSkinId,
+} from "./prototype-skin-switcher";
 
 // the persistent meta profile (design §7): storm cores + workshop nodes only,
 // hydrated once at boot. storms are ephemeral, so nothing in-storm ever touches this.
@@ -243,6 +250,8 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         snapshot(stateRef.current, autoStrikerRef.current)
     );
     const [muted, setMuted] = useState(false);
+    // PROTOTYPE (sh8): current skin, seeded from ?skin= so a variant is shareable.
+    const [skin, setSkin] = useState<PrototypeSkinId>(() => readPrototypeSkin());
     const [cps, setCps] = useState(0);
     const [heat, setHeat] = useState(0);
     const [surgeHud, setSurgeHud] = useState({
@@ -730,7 +739,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
     }
 
     return (
-        <div className="layout">
+        <div className={skin === "current" ? "layout" : `layout skin-${skin}`}>
             <div
                 ref={hostRef}
                 className={[
@@ -746,6 +755,11 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 onPointerUp={stopPainting}
                 onPointerLeave={stopPainting}
             />
+            {skin === "marquee" && (
+                <div className="proto-marquee">
+                    <span>CRITSTORM</span>
+                </div>
+            )}
             <aside className="hud">
                 <div className="title-row">
                     <h1>critstorm</h1>
@@ -971,6 +985,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                           : "click anywhere to attack manually · catch falling 7 7 7"}
                 </p>
             </aside>
+            <PrototypeSkinSwitcher skin={skin} onChange={setSkin} />
         </div>
     );
 }

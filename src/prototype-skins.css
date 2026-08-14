@@ -1,0 +1,757 @@
+/* PROTOTYPE — sh8 art-direction skins. three answers to "casino soul, pixel
+   body": what does the cabinet chrome look like when it's rebuilt in the sim's
+   own pixel-native language instead of smooth CSS gradients?
+
+     A .skin-cabinet — the HUD is diegetic pixel hardware: chunky bezels, hard
+       dither, square bulbs, bitmap type. the machine is drawn in the same
+       medium as the sand.
+     B .skin-bare    — chrome recedes to near-zero: sim goes full-bleed, the
+       HUD is a translucent instrument column of thin phosphor type. casino
+       identity carried by the gold itself, not the frame.
+     C .skin-marquee — attract-mode maximalism: red felt, chasing bulb strips,
+       a hanging sign, seven-segment money. loud on purpose.
+
+   throwaway file: the winning direction gets rebuilt properly in index.css. */
+
+@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Silkscreen:wght@400;700&family=VT323&display=swap");
+
+/* ─── the switcher pill (not part of any design being judged) ───────────── */
+
+.proto-switcher {
+    position: fixed;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    background: #f5f5f5;
+    color: #111;
+    border-radius: 999px;
+    font: 12px/1 system-ui, sans-serif;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+.proto-switcher span {
+    min-width: 160px;
+    text-align: center;
+}
+.proto-switcher button {
+    border: none;
+    background: #111;
+    color: #fff;
+    border-radius: 999px;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   A — PIXEL CABINET
+   the side panel is a machine face drawn at pixel scale. no radius, no blur,
+   no smooth gradient: stepped gold, 2×2 dither, hard offset shadows, square
+   marquee bulbs, bitmap fonts. buttons are physical pixel keys that depress.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.skin-cabinet {
+    --px-gold: #f4cf5a;
+    --px-gold-hi: #fff2c2;
+    --px-gold-deep: #a97d24;
+    --px-gold-dark: #6f4f14;
+    --px-red: #ff2e46;
+    --px-panel: #14100a;
+    --px-panel-hi: #201810;
+    --px-black: #060504;
+    font-family: "Silkscreen", monospace;
+}
+
+/* kill the smooth-CSS framing wholesale: no vignette, no glow bloom. the
+   stage gets a hard stepped bezel instead — screen set into a machine. */
+.skin-cabinet .stage::before {
+    box-shadow:
+        inset 0 0 0 2px var(--px-black),
+        inset 0 0 0 4px var(--px-gold-deep),
+        inset 0 0 0 6px var(--px-gold-dark),
+        inset 0 0 0 8px var(--px-black);
+}
+.skin-cabinet .stage.frenzy::after {
+    animation: none;
+    box-shadow:
+        inset 0 0 0 4px var(--px-red),
+        inset 0 0 0 8px #7a0f1f;
+}
+
+.skin-cabinet .hud {
+    background:
+        repeating-conic-gradient(rgba(255, 232, 154, 0.05) 0% 25%, transparent 0% 50%) 0 0 / 4px
+            4px,
+        var(--px-panel);
+    border-left: 4px solid var(--px-black);
+    box-shadow: none;
+    padding: 16px 14px 14px;
+    gap: 10px;
+}
+
+/* the seam becomes a strip of SQUARE bulbs that chase in whole-bulb steps. */
+.skin-cabinet .hud::before {
+    width: 10px;
+    left: -4px;
+    background:
+        repeating-linear-gradient(
+            180deg,
+            var(--px-black) 0 3px,
+            #59421a 3px 9px,
+            var(--px-black) 9px 12px
+        );
+    box-shadow: none;
+}
+.skin-cabinet .hud::after {
+    width: 10px;
+    left: -4px;
+    background: repeating-linear-gradient(
+        180deg,
+        transparent 0 3px,
+        #ffe89a 3px 9px,
+        transparent 9px 36px
+    );
+    opacity: 1;
+    animation: px-bulb-step 0.9s steps(3) infinite;
+}
+@keyframes px-bulb-step {
+    to {
+        transform: translateY(36px);
+    }
+}
+
+.skin-cabinet .hud h1 {
+    font-family: "Press Start 2P", monospace;
+    font-size: 13px;
+    letter-spacing: 0;
+    color: var(--px-gold);
+    text-shadow: 2px 2px 0 var(--px-black), 3px 3px 0 var(--px-gold-dark);
+    text-transform: uppercase;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+}
+
+/* money is a mechanical counter window: inset black slot, phosphor digits. */
+.skin-cabinet .payout {
+    background: var(--px-black);
+    border: none;
+    border-radius: 0;
+    box-shadow:
+        0 0 0 2px var(--px-gold-dark),
+        0 0 0 4px var(--px-black),
+        inset 0 3px 0 rgba(255, 255, 255, 0.06);
+    padding: 8px 10px;
+}
+.skin-cabinet .payout-value {
+    font-family: "VT323", monospace;
+    font-size: 34px;
+    letter-spacing: 2px;
+    color: var(--px-gold-hi);
+    text-shadow: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+}
+.skin-cabinet .payout-label {
+    font-family: "Silkscreen", monospace;
+    font-size: 8px;
+    letter-spacing: 2px;
+    color: var(--px-gold-deep);
+}
+
+.skin-cabinet .dps .stat-val,
+.skin-cabinet .chip-v,
+.skin-cabinet .pot-value,
+.skin-cabinet .upgrade-cost,
+.skin-cabinet .bank-take {
+    font-family: "VT323", monospace;
+}
+.skin-cabinet .chip {
+    border-radius: 0;
+    border: 2px solid var(--px-gold-dark);
+    background: var(--px-black);
+    box-shadow: 2px 2px 0 var(--px-black);
+}
+
+/* meters are LED cell rows: the mask cuts BOTH track and fill into segments,
+   so partial fill snaps to whole cells — a pixel meter, not a progress bar. */
+.skin-cabinet .heat-bar,
+.skin-cabinet .core-bar,
+.skin-cabinet .rank-bar {
+    border-radius: 0;
+    height: 12px;
+    background: var(--px-black);
+    box-shadow: 0 0 0 2px var(--px-gold-dark);
+    mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+}
+.skin-cabinet .heat-fill,
+.skin-cabinet .core-fill,
+.skin-cabinet .rank-fill {
+    border-radius: 0;
+    background: var(--px-gold);
+    box-shadow: none;
+}
+.skin-cabinet .core-fill {
+    background: var(--px-red);
+}
+.skin-cabinet .core-tick {
+    width: 3px;
+    background: var(--px-gold-hi);
+}
+
+/* pixel keys: flat face, hard 3px drop, press = key travels into the panel. */
+.skin-cabinet .upgrades button,
+.skin-cabinet .brushes button,
+.skin-cabinet .bank-out-btn,
+.skin-cabinet .mute {
+    border-radius: 0;
+    border: 2px solid var(--px-black);
+    background: var(--px-panel-hi);
+    box-shadow:
+        inset 0 2px 0 rgba(255, 242, 194, 0.12),
+        3px 3px 0 var(--px-black);
+    transition: none;
+    font-family: "Silkscreen", monospace;
+}
+.skin-cabinet .upgrades button:not(:disabled):hover,
+.skin-cabinet .brushes button:not(:disabled):hover {
+    transform: none;
+    background: #2a2013;
+}
+.skin-cabinet .upgrades button:not(:disabled):active,
+.skin-cabinet .brushes button:not(:disabled):active,
+.skin-cabinet .bank-out-btn:active {
+    transform: translate(3px, 3px);
+    box-shadow: inset 0 2px 0 rgba(255, 242, 194, 0.12);
+}
+.skin-cabinet .brushes button.selected {
+    background: var(--px-gold-dark);
+    border-color: var(--px-gold);
+}
+
+/* the surge panel is the jackpot window: red pixel frame, stepped — no glow. */
+.skin-cabinet .surge-panel {
+    border-radius: 0;
+    border: none;
+    background: var(--px-black);
+    box-shadow:
+        0 0 0 2px var(--px-red),
+        0 0 0 4px #7a0f1f,
+        0 0 0 6px var(--px-black);
+    animation: none;
+}
+.skin-cabinet .surge-word,
+.skin-cabinet .bank-word {
+    font-family: "Press Start 2P", monospace;
+    letter-spacing: 0;
+}
+.skin-cabinet .pot-value {
+    font-size: 40px;
+    letter-spacing: 2px;
+    color: var(--px-gold-hi);
+    text-shadow: 3px 3px 0 var(--px-gold-dark);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+}
+.skin-cabinet .bank-btn {
+    border-radius: 0;
+    border: 2px solid var(--px-black);
+    background: var(--px-gold);
+    color: var(--px-black);
+    box-shadow:
+        inset 0 3px 0 var(--px-gold-hi),
+        inset 0 -3px 0 var(--px-gold-deep),
+        4px 4px 0 var(--px-black);
+    animation: none;
+}
+.skin-cabinet .bank-btn:active {
+    transform: translate(4px, 4px);
+    box-shadow:
+        inset 0 3px 0 var(--px-gold-hi),
+        inset 0 -3px 0 var(--px-gold-deep);
+}
+
+.skin-cabinet .hint {
+    font-size: 9px;
+    color: #7c6c47;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   B — BARE INSTRUMENT
+   the sim is the whole screen. the HUD is a translucent right-edge column of
+   thin phosphor type — an instrument cluster, not a cabinet. no boxes, no
+   borders: hierarchy from size and rules only. casino identity lives in the
+   gold matter and the surge moments, not in the chrome.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.skin-bare {
+    --ph-gold: #f4cf5a;
+    --ph-dim: #8d7b50;
+    --ph-faint: #55492e;
+    position: relative;
+    font-family: "VT323", monospace;
+}
+
+/* full bleed: the column floats OVER the sim instead of beside it. */
+.skin-bare .stage {
+    position: absolute;
+    inset: 0;
+}
+.skin-bare .stage::before {
+    box-shadow: inset 0 0 60px 4px rgba(0, 0, 0, 0.5);
+}
+.skin-bare .hud {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 232px;
+    padding: 18px 16px;
+    background: linear-gradient(270deg, rgba(5, 4, 2, 0.88) 55%, rgba(5, 4, 2, 0.55) 85%, transparent);
+    border-left: none;
+    box-shadow: none;
+    gap: 14px;
+    pointer-events: none;
+}
+.skin-bare .hud > * {
+    pointer-events: auto;
+}
+.skin-bare .hud::before,
+.skin-bare .hud::after {
+    display: none;
+}
+
+.skin-bare .hud h1 {
+    font-family: "VT323", monospace;
+    font-size: 18px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--ph-dim);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+    text-shadow: none;
+}
+
+/* the one big number: essence, bare, no box around it. */
+.skin-bare .payout {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    border-bottom: 1px solid var(--ph-faint);
+}
+.skin-bare .payout-value {
+    font-family: "VT323", monospace;
+    font-size: 44px;
+    color: var(--ph-gold);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    text-shadow: none;
+}
+.skin-bare .payout-label {
+    letter-spacing: 3px;
+    font-size: 10px;
+    color: var(--ph-dim);
+}
+
+.skin-bare .dps,
+.skin-bare .chip {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+.skin-bare .chip-v,
+.skin-bare .dps .stat-val {
+    font-family: "VT323", monospace;
+    font-size: 20px;
+    color: #d8c790;
+}
+.skin-bare .statgrid {
+    border-bottom: 1px solid var(--ph-faint);
+    padding-bottom: 10px;
+}
+
+/* meters are 3px hairlines. */
+.skin-bare .heat-bar,
+.skin-bare .core-bar,
+.skin-bare .rank-bar {
+    height: 3px;
+    border-radius: 0;
+    background: var(--ph-faint);
+    box-shadow: none;
+    border: none;
+}
+.skin-bare .heat-fill,
+.skin-bare .rank-fill {
+    border-radius: 0;
+    background: var(--ph-gold);
+    box-shadow: none;
+}
+.skin-bare .core-fill {
+    border-radius: 0;
+    background: #ff2e46;
+    box-shadow: none;
+}
+.skin-bare .core-tick {
+    width: 1px;
+    height: 9px;
+    top: -3px;
+    background: #efe6cf;
+}
+
+/* buttons are text rows: no chrome until hover, cost right-aligned. */
+.skin-bare .upgrades button,
+.skin-bare .brushes button,
+.skin-bare .bank-out-btn,
+.skin-bare .mute {
+    background: none;
+    border: none;
+    border-radius: 0;
+    border-bottom: 1px solid var(--ph-faint);
+    box-shadow: none;
+    font-family: "VT323", monospace;
+    font-size: 15px;
+    padding: 6px 2px;
+    transition: none;
+}
+.skin-bare .upgrades button:not(:disabled):hover,
+.skin-bare .brushes button:not(:disabled):hover {
+    transform: none;
+    background: rgba(244, 207, 90, 0.08);
+    border-bottom-color: var(--ph-gold);
+}
+.skin-bare .brushes button.selected {
+    background: rgba(244, 207, 90, 0.14);
+    border-bottom-color: var(--ph-gold);
+}
+.skin-bare .upgrade-desc {
+    display: none; /* the column stays quiet; names + costs only */
+}
+.skin-bare .upgrade-cost {
+    font-family: "VT323", monospace;
+    color: var(--ph-gold);
+}
+.skin-bare .brushes-label {
+    letter-spacing: 3px;
+    font-size: 10px;
+    color: var(--ph-dim);
+}
+
+/* the surge takes over the column — the ONE place the casino gets loud. */
+.skin-bare .surge-panel {
+    background: rgba(20, 4, 6, 0.85);
+    border: 1px solid #ff2e46;
+    border-radius: 0;
+    box-shadow: none;
+    animation: none;
+}
+.skin-bare .pot-value {
+    font-family: "VT323", monospace;
+    font-size: 48px;
+    color: var(--ph-gold);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+}
+.skin-bare .bank-btn {
+    border-radius: 0;
+    border: 1px solid var(--ph-gold);
+    background: var(--ph-gold);
+    color: #0d0b08;
+    box-shadow: none;
+    animation: none;
+    font-family: "VT323", monospace;
+}
+.skin-bare .hint {
+    color: var(--ph-faint);
+    font-size: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   C — VEGAS MARQUEE
+   attract mode, pixel-built: chasing bulb strips across the top and bottom of
+   the whole viewport, a hanging CRITSTORM sign over the screen, red-felt
+   panel, seven-segment money. maximal — the opposite pole from B.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.skin-marquee {
+    --mq-felt: #4a0c14;
+    --mq-felt-deep: #2c060c;
+    --mq-gold: #ffd75e;
+    --mq-gold-deep: #b3861f;
+    --mq-bulb: #fff3c8;
+    --mq-black: #120204;
+    position: relative;
+    font-family: "Silkscreen", monospace;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    background: var(--mq-black);
+}
+
+/* edge strips, toned down at rest: mostly-unlit brass bulbs with one dim
+   roamer, slow whole-bulb steps. they exist as framing, not as a show — the
+   show is the surge ring below. */
+.skin-marquee::before,
+.skin-marquee::after {
+    content: "";
+    position: fixed;
+    left: 0;
+    right: 0;
+    height: 16px;
+    z-index: 50;
+    pointer-events: none;
+    background:
+        repeating-linear-gradient(
+            90deg,
+            transparent 0 4px,
+            rgba(255, 232, 154, 0.28) 4px 12px,
+            transparent 12px 96px
+        ),
+        repeating-linear-gradient(90deg, var(--mq-black) 0 4px, #4d3812 4px 12px, var(--mq-black) 12px 16px);
+    animation: mq-chase 2.4s steps(6) infinite;
+}
+.skin-marquee::before {
+    top: 0;
+}
+.skin-marquee::after {
+    bottom: 0;
+}
+@keyframes mq-chase {
+    to {
+        background-position: 96px 0, 0 0;
+    }
+}
+
+/* the whole room wakes up while a surge is live: the edge strips brighten and
+   chase at show speed, in sync with the bulb ring around the sim frame. */
+.skin-marquee:has(.stage.frenzy)::before,
+.skin-marquee:has(.stage.frenzy)::after {
+    background:
+        repeating-linear-gradient(
+            90deg,
+            transparent 0 4px,
+            var(--mq-bulb) 4px 12px,
+            transparent 12px 48px
+        ),
+        repeating-linear-gradient(90deg, var(--mq-black) 0 4px, #6b4d16 4px 12px, var(--mq-black) 12px 16px);
+    animation: mq-chase-live 0.75s steps(3) infinite;
+}
+@keyframes mq-chase-live {
+    to {
+        background-position: 48px 0, 0 0;
+    }
+}
+
+/* the hanging sign over the screen. */
+.proto-marquee {
+    position: absolute;
+    top: 26px;
+    left: 0;
+    right: 320px;
+    z-index: 40;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+}
+.proto-marquee span {
+    font-family: "Press Start 2P", monospace;
+    font-size: 22px;
+    color: var(--mq-gold);
+    background: var(--mq-black);
+    padding: 12px 22px;
+    border: 3px solid var(--mq-gold-deep);
+    box-shadow:
+        0 0 0 3px var(--mq-black),
+        0 0 0 6px var(--mq-gold-deep),
+        6px 6px 0 rgba(0, 0, 0, 0.7);
+    text-shadow: 3px 3px 0 #7a0f1f;
+}
+
+.skin-marquee .stage::before {
+    box-shadow:
+        inset 0 0 0 3px var(--mq-black),
+        inset 0 0 0 6px var(--mq-gold-deep),
+        inset 0 0 0 9px var(--mq-black);
+}
+
+/* the surge tell, repurposed from the red pulsing glow: a marquee bulb ring
+   around the whole sim frame. two dot grids offset half a tile alternate in
+   steps(1) — the classic lit/unlit marquee flip, zero easing. the mask cuts
+   the content box out so only a 16px frame paints, and the sim underneath
+   stays untinted (the physics stays the theater). */
+.skin-marquee .stage.frenzy::after {
+    opacity: 1;
+    padding: 16px;
+    background:
+        radial-gradient(circle, var(--mq-bulb) 0 3px, transparent 3.5px) 0 0 / 16px 16px,
+        radial-gradient(circle, #6b4d16 0 3px, transparent 3.5px) 8px 8px / 16px 16px,
+        var(--mq-black);
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    box-shadow: none;
+    animation: mq-surge-ring 0.5s steps(1) infinite;
+}
+@keyframes mq-surge-ring {
+    50% {
+        background-position: 8px 8px, 0 0, 0 0;
+    }
+}
+/* ignition beat: the same ring flips at double speed for the first moment. */
+.skin-marquee .stage.igniting::after {
+    animation: mq-surge-ring 0.25s steps(1) infinite;
+}
+
+/* red felt panel with a pixel rope border. */
+.skin-marquee .hud {
+    background:
+        repeating-conic-gradient(rgba(0, 0, 0, 0.18) 0% 25%, transparent 0% 50%) 0 0 / 6px 6px,
+        linear-gradient(180deg, var(--mq-felt), var(--mq-felt-deep) 70%);
+    border-left: 6px solid var(--mq-black);
+    box-shadow: none;
+}
+.skin-marquee .hud::before {
+    width: 8px;
+    left: -6px;
+    background: repeating-linear-gradient(
+        180deg,
+        var(--mq-gold) 0 8px,
+        var(--mq-gold-deep) 8px 16px
+    );
+    box-shadow: none;
+    animation: none;
+}
+.skin-marquee .hud::after {
+    display: none;
+}
+
+.skin-marquee .hud h1 {
+    font-family: "Press Start 2P", monospace;
+    font-size: 12px;
+    color: var(--mq-gold);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+    text-shadow: 2px 2px 0 var(--mq-black);
+}
+
+/* seven-segment money: black window, red LED-adjacent gold digits. */
+.skin-marquee .payout {
+    background: var(--mq-black);
+    border: 3px solid var(--mq-gold-deep);
+    border-radius: 0;
+    box-shadow: inset 0 0 0 3px #000;
+}
+.skin-marquee .payout-value {
+    font-family: "VT323", monospace;
+    font-size: 40px;
+    letter-spacing: 4px;
+    color: var(--mq-gold);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+}
+.skin-marquee .payout-label {
+    font-size: 8px;
+    letter-spacing: 3px;
+    color: var(--mq-gold-deep);
+}
+
+.skin-marquee .chip {
+    border-radius: 0;
+    background: var(--mq-black);
+    border: 2px solid var(--mq-gold-deep);
+}
+.skin-marquee .chip-v {
+    font-family: "VT323", monospace;
+    color: var(--mq-gold);
+}
+
+.skin-marquee .heat-bar,
+.skin-marquee .core-bar,
+.skin-marquee .rank-bar {
+    border-radius: 0;
+    height: 14px;
+    background: var(--mq-black);
+    border: 2px solid var(--mq-gold-deep);
+    box-shadow: none;
+    mask-image: none;
+}
+.skin-marquee .heat-fill,
+.skin-marquee .rank-fill {
+    border-radius: 0;
+    background: repeating-linear-gradient(90deg, var(--mq-gold) 0 8px, var(--mq-gold-deep) 8px 10px);
+    box-shadow: none;
+}
+.skin-marquee .core-fill {
+    border-radius: 0;
+    background: repeating-linear-gradient(90deg, #ff2e46 0 8px, #7a0f1f 8px 10px);
+    box-shadow: none;
+}
+
+.skin-marquee .upgrades button,
+.skin-marquee .brushes button,
+.skin-marquee .bank-out-btn,
+.skin-marquee .mute {
+    border-radius: 0;
+    border: 2px solid var(--mq-black);
+    background: linear-gradient(180deg, #641019, #3a0810);
+    box-shadow:
+        inset 0 2px 0 rgba(255, 215, 94, 0.25),
+        3px 3px 0 var(--mq-black);
+    font-family: "Silkscreen", monospace;
+    transition: none;
+}
+.skin-marquee .upgrades button:not(:disabled):active,
+.skin-marquee .brushes button:not(:disabled):active {
+    transform: translate(3px, 3px);
+    box-shadow: inset 0 2px 0 rgba(255, 215, 94, 0.25);
+}
+.skin-marquee .brushes button.selected {
+    border-color: var(--mq-gold);
+    background: #7a1620;
+}
+.skin-marquee .upgrade-cost {
+    font-family: "VT323", monospace;
+    color: var(--mq-gold);
+}
+
+.skin-marquee .surge-panel {
+    border-radius: 0;
+    border: 3px solid var(--mq-gold);
+    background: var(--mq-black);
+    box-shadow:
+        0 0 0 3px var(--mq-black),
+        0 0 0 6px #ff2e46;
+    animation: none;
+}
+.skin-marquee .surge-word {
+    font-family: "Press Start 2P", monospace;
+}
+.skin-marquee .pot-value {
+    font-family: "VT323", monospace;
+    font-size: 46px;
+    letter-spacing: 3px;
+    color: var(--mq-gold);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+}
+.skin-marquee .bank-btn {
+    border-radius: 0;
+    border: 3px solid var(--mq-black);
+    background: repeating-linear-gradient(180deg, var(--mq-gold) 0 4px, #e0b73e 4px 8px);
+    color: var(--mq-black);
+    box-shadow: 4px 4px 0 var(--mq-black);
+    animation: none;
+    font-family: "Press Start 2P", monospace;
+}
+.skin-marquee .bank-btn:active {
+    transform: translate(4px, 4px);
+    box-shadow: none;
+}
+.skin-marquee .hint {
+    color: #b3861f;
+    font-size: 9px;
+}
