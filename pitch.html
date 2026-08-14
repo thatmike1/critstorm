@@ -1,0 +1,653 @@
+<title>CRITSTORM</title>
+<style>
+  :root {
+    --ground: #0b0908;
+    --ground-2: #120d0b;
+    --panel: #3d1418;
+    --panel-2: #521b20;
+    --panel-edge: #7a2a2c;
+    --gold: #e9b23c;
+    --gold-dim: #8f6c22;
+    --molten: #ff7f2a;
+    --teal: #3f8fa3;
+    --bone: #e6dccb;
+    --muted: #9a8b74;
+    --rule: #2a1d18;
+
+    --mono: ui-monospace, "SFMono-Regular", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--bone);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 0 5rem;
+  }
+
+  /* --- cabinet frame: the checkered gold edge from the game's own border --- */
+  .frame-strip {
+    height: 10px;
+    background:
+      repeating-linear-gradient(90deg,
+        var(--gold) 0 6px,
+        var(--gold-dim) 6px 12px);
+    opacity: .85;
+  }
+
+  .wrap {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+
+  /* --- type --- */
+  .label {
+    font-family: var(--mono);
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .22em;
+    color: var(--gold);
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(2rem, 7vw, 4.2rem);
+    letter-spacing: .16em;
+    font-weight: 700;
+    margin: 0;
+    color: var(--gold);
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: clamp(1.1rem, 2.6vw, 1.5rem);
+    text-transform: uppercase;
+    letter-spacing: .18em;
+    color: var(--gold);
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: var(--mono);
+    font-size: .82rem;
+    text-transform: uppercase;
+    letter-spacing: .16em;
+    color: var(--bone);
+    margin: 0 0 .5rem;
+  }
+
+  p { margin: 0 0 1rem; max-width: 62ch; }
+  p:last-child { margin-bottom: 0; }
+  strong { color: var(--gold); font-weight: 600; }
+  em { color: var(--bone); font-style: italic; }
+
+  .lede {
+    font-size: clamp(1.15rem, 2.4vw, 1.4rem);
+    line-height: 1.5;
+    color: var(--bone);
+    max-width: 40ch;
+  }
+
+  /* --- hero --- */
+  header {
+    padding: 3.5rem 0 2.5rem;
+    background:
+      radial-gradient(120% 90% at 50% 0%, #1a100c 0%, var(--ground) 70%);
+  }
+
+  .marquee {
+    display: inline-block;
+    border: 3px double var(--gold);
+    padding: .6rem 1.4rem .5rem;
+    background: #14100d;
+  }
+
+  .hero-grid {
+    display: grid;
+    gap: 2rem;
+    margin-top: 2rem;
+  }
+
+  @media (min-width: 60rem) {
+    .hero-grid { grid-template-columns: 1fr 1fr; align-items: center; }
+  }
+
+  .stage {
+    border: 2px solid var(--panel-edge);
+    background: #070605;
+    padding: 4px;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    image-rendering: pixelated;
+    background: #070605;
+  }
+
+  .readout {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+    margin-top: .75rem;
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .readout b {
+    color: var(--gold);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .caption {
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: .5rem;
+  }
+
+  /* --- sections --- */
+  section { padding: 3.25rem 0; border-top: 1px solid var(--rule); }
+  .section-head { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1.75rem; }
+
+  .cols {
+    display: grid;
+    gap: 1.25rem;
+  }
+  @media (min-width: 48rem) {
+    .cols-2 { grid-template-columns: repeat(2, 1fr); }
+    .cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .cols-4 { grid-template-columns: repeat(4, 1fr); }
+  }
+
+  .panel {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--panel-edge);
+    padding: 1.1rem 1.2rem;
+  }
+  .panel p { font-size: .95rem; color: #f0e6d6; }
+
+  .plate {
+    background: var(--ground-2);
+    border: 1px solid var(--rule);
+    padding: 1.1rem 1.2rem;
+  }
+  .plate p { font-size: .95rem; }
+
+  /* --- the loop: a real sequence, so it gets real numbers --- */
+  ol.loop { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  ol.loop li {
+    counter-increment: step;
+    background: var(--ground-2);
+    padding: 1.1rem 1.2rem 1.1rem 3.6rem;
+    position: relative;
+  }
+  ol.loop li::before {
+    content: counter(step);
+    position: absolute;
+    left: 1.2rem;
+    top: 1.05rem;
+    font-family: var(--mono);
+    font-size: 1.1rem;
+    color: var(--gold-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  ol.loop p { font-size: .95rem; margin: 0; }
+
+  /* --- surge exits --- */
+  .exit { border: 1px solid var(--rule); padding: 1.2rem; background: var(--ground-2); }
+  .exit.bank { border-color: var(--gold-dim); }
+  .exit.bust { border-color: #7a3418; }
+  .exit .verdict { font-family: var(--mono); font-size: 1.05rem; letter-spacing: .18em; text-transform: uppercase; }
+  .exit.bank .verdict { color: var(--gold); }
+  .exit.bust .verdict { color: var(--molten); }
+
+  .math {
+    font-family: var(--mono);
+    font-size: .95rem;
+    letter-spacing: .05em;
+    color: var(--bone);
+    background: #070605;
+    border: 1px solid var(--gold-dim);
+    padding: .9rem 1rem;
+    text-align: center;
+    margin: 0 0 1rem;
+    overflow-x: auto;
+  }
+
+  /* --- data list --- */
+  dl.spec { margin: 0; display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  dl.spec > div { background: var(--ground-2); padding: .85rem 1.1rem; display: grid; gap: .2rem; }
+  @media (min-width: 40rem) {
+    dl.spec > div { grid-template-columns: 12rem 1fr; gap: 1.2rem; align-items: baseline; }
+  }
+  dl.spec dt { font-family: var(--mono); font-size: .74rem; text-transform: uppercase; letter-spacing: .16em; color: var(--gold); }
+  dl.spec dd { margin: 0; font-size: .95rem; }
+
+  .chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .6rem;
+    font-family: var(--mono);
+    font-size: .78rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    margin-bottom: 1.25rem;
+  }
+  .chain span { border: 1px solid var(--panel-edge); padding: .4rem .7rem; background: var(--panel); }
+  .chain i { color: var(--gold-dim); font-style: normal; }
+
+  .status li { margin-bottom: .4rem; }
+  ul.status { list-style: none; padding: 0; margin: 0; font-size: .95rem; }
+  ul.status li::before { content: "▪"; color: var(--gold-dim); margin-right: .7rem; }
+  ul.status li.pending::before { content: "▫"; color: var(--muted); }
+
+  footer {
+    padding-top: 2.5rem;
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="frame-strip"></div>
+
+<header>
+  <div class="wrap">
+    <div class="marquee"><h1>CRITSTORM</h1></div>
+    <div class="hero-grid">
+      <div>
+        <p class="lede" style="margin-top:1.5rem">A push-your-luck incremental where the payout is not a number going up. It is molten gold, erupting into a falling-sand world that can burn it, boil it, or swallow it before you ever get to keep it.</p>
+        <p style="color:var(--muted); font-size:.95rem">Comps: <em>Nodebuster</em> for run structure and length, <em>The Gnorp Apologue</em> for a particle-sim economy you can watch. Gnorp renders wealth as matter. Critstorm makes matter <strong>mortal</strong>.</p>
+      </div>
+      <div>
+        <div class="stage"><canvas id="sim" width="320" height="180" aria-label="A miniature of the game: molten gold erupts from the core, cools into solid gold, and drains into the collector."></canvas></div>
+        <div class="readout">
+          <span>Erupted <b id="r-erupt">0</b></span>
+          <span>Collected <b id="r-coll">0</b></span>
+          <span>Lost <b id="r-lost">0</b></span>
+        </div>
+        <p class="caption">Live miniature — same rules, smaller grid</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section>
+    <div class="section-head">
+      <span class="label">The pitch</span>
+      <h2>Greed is the verb</h2>
+    </div>
+    <div class="cols cols-2">
+      <div>
+        <p>Every unit of value in Critstorm is particles in the world. Currency never ticks up abstractly — it is erupted, it pools, it melts, it is lost or it is collected. If a number changes, something physical caused it.</p>
+        <p>That makes the failure state visible. There is no hidden bust roll. Riding a crit chain heats the world through a real thermal model: fire spreads, ice melts, your gold pool sits there at risk. You can watch the disaster coming and fight it with terrain.</p>
+      </div>
+      <div class="panel">
+        <h3>The guardrail</h3>
+        <p>Any feature that makes gold safe by default kills the whole differentiator. Automation is allowed to <em>route</em> wealth. It is never allowed to de-risk it for free.</p>
+        <p>That single rule decides what every upgrade in the game is permitted to do.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="label">Moment to moment · about ten seconds</span>
+      <h2>The loop</h2>
+    </div>
+    <ol class="loop">
+      <li><h3>Strike</h3><p>Click anywhere in the zone around the storm core. This rolls the crit chain — consecutive crits climb tiers 0 through 8.</p></li>
+      <li><h3>Erupt</h3><p>The payout erupts from the core toward your cursor as molten gold. Mass scales with the size of the payout; temperature scales with the tier. High tiers throw lava droplets and lightning with them.</p></li>
+      <li><h3>Cool &amp; pool</h3><p>Molten gold flows, splashes off terrain, and cools into solid gold powder. On the way it ignites anything flammable and melts your own defenses.</p></li>
+      <li><h3>Collect</h3><p>Gold that reaches the collector converts to essence you can spend. Gold still lying in the world is the unbanked pot — earning nothing, at risk, waiting to be routed.</p></li>
+      <li><h3>Spend</h3><p>Essence buys crit upgrades, defensive materials you paint on with a brush, and structures that automate the routing.</p></li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="label">The centerpiece</span>
+      <h2>The surge — bank or ride</h2>
+    </div>
+    <p style="margin-bottom:1.5rem">Clicking fills a heat meter. At full, a surge begins, and every strike from then on feeds a pot that is not an abstract number — it is molten gold visibly swelling inside the core, which glows brighter and bulges as it grows.</p>
+    <p class="math">pot multiplier&nbsp; M = 1.5<sup>n</sup> &nbsp;&nbsp;for n crits landed this surge</p>
+    <p>Meanwhile the world heats from two directions. An ambient ramp climbs quadratically with every second of surge time — you cannot wait it out. And every crit injects a heat spike scaled by its tier, which is random. The same roll that pumps your pot is the roll that can end it. That randomness is load-bearing: a purely deterministic ramp would make "bank at 95% of critical" the one correct answer and there would be no gamble left.</p>
+    <div class="cols cols-2" style="margin:1.75rem 0">
+      <div class="exit bank">
+        <div class="verdict">Bank</div>
+        <p>The entire pot erupts at once as a mountain of gold. That is the spectacle — and it is physical, so it still has to survive the world and actually reach the collector. The surge ends and the world cools.</p>
+      </div>
+      <div class="exit bust">
+        <div class="verdict">Overheat</div>
+        <p>Push past critical temperature and the surge detonates. The pot erupts as lava and fire instead of gold. You watch your winnings burn, and the world gold near the core melts with it.</p>
+      </div>
+    </div>
+    <p>The tuning target is that riding one more crit stops paying once the bust chance clears roughly one in three — which should land near six crits with no defenses and near ten with a good defensive layout. That gap is the entire reason to build defenses, so it has to be legible to the player.</p>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="label">Why the world matters</span>
+      <h2>The world fights back</h2>
+    </div>
+    <div class="cols cols-3">
+      <div class="plate">
+        <h3>Materials</h3>
+        <p>Molten gold ignites what it touches and cools into solid gold. Solid gold is a dense powder that sinks through water, melts back under heat, and dissolves in acid. Buried piles fuse into ingots so a fortune stays visually dense instead of flooding the screen.</p>
+      </div>
+      <div class="plate">
+        <h3>Defense you paint</h3>
+        <p>Stone baffles channel flows. Water quenches molten gold fast — which is both good and bad, because solid gold no longer flows to the collector. Ice is the strongest quench and melts under sustained heat. Walls are indestructible and cost accordingly.</p>
+      </div>
+      <div class="plate">
+        <h3>Structures</h3>
+        <p>The collector drains gold into essence at a fee. Magnets pull gold toward them. Auto-strikers fire on a timer. Sprinklers spray water. A lightning rod converts the storm's own lightning into free maximum-tier strikes.</p>
+      </div>
+    </div>
+    <div class="cols cols-2" style="margin-top:1.25rem">
+      <div class="panel">
+        <h3>Storm events</h3>
+        <p>Gold rain is the jackpot — catch it before it lands somewhere hostile. Acid drizzle, lava fissures and lightning fronts are the threats. Both scale in cadence and severity the longer a storm runs, so the world itself is what pressures you to get out.</p>
+      </div>
+      <div class="panel">
+        <h3>Fronts</h3>
+        <p>The flats are open ground and mild weather. The bog buries oil pockets under plant growth — high fire risk, and much more gold rain to tempt you into it. The eye is a lava floor under constant lightning, and the win condition lives there.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="label">The run</span>
+      <h2>Three currencies, no menus</h2>
+    </div>
+    <div class="chain">
+      <span>Gold</span><i>→</i><span>Essence</span><i>→</i><span>Storm cores</span>
+    </div>
+    <p style="margin-bottom:1.5rem">Every conversion between them is a physical action in the world, never a menu transaction. Gold is matter at risk. Essence is what survived the trip through the collector, and it resets each storm. Cores are permanent, and you earn them from the square root of what you banked — which means a storm twice as rich is not a storm twice as valuable.</p>
+    <dl class="spec">
+      <div><dt>A storm</dt><dd>Eight to thirty-five minutes. It ends when you bank out on your own terms and keep everything with a bonus on top — or when the world blows up and consumes everything you never routed.</dd></div>
+      <div><dt>Between storms</dt><dd>Spend cores in the workshop across four tracks: crit stats, collector economy, defensive kit, and access to new fronts. Then pick where the next storm lands.</dd></div>
+      <div><dt>The cost of greed</dt><dd>Banking out multiplies the cores you earn. Riding to a blow-up forfeits that multiplier, so about a third of a storm's permanent progress rides on knowing when to stop. Quitting while ahead has to feel smart, not cowardly.</dd></div>
+      <div><dt>The finale</dt><dd>In the eye, bank a single pot above the threshold at full multiplier and you trigger the CRITSTORM — a world-consuming golden storm, then the stats screen. Reachable in five to seven hours. A finite, designed ending.</dd></div>
+    </dl>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="label">Build status</span>
+      <h2>Where it actually is</h2>
+    </div>
+    <div class="cols cols-2">
+      <div>
+        <ul class="status">
+          <li>Falling-sand simulation ported and rendering under the game stage</li>
+          <li>Strikes, tier-scaled eruptions, molten gold cooling and pooling</li>
+          <li>Surge with the pot, the bank exit and the physical overheat bust</li>
+          <li>Collector, magnet, auto-striker, sprinkler, lightning rod</li>
+          <li>Stone and water brushes, painted per cell</li>
+          <li>Workshop across four tracks, plus the flats and the bog</li>
+          <li>Storm events: gold rain, acid drizzle, lava fissures, lightning fronts</li>
+          <li class="pending">The eye, and the CRITSTORM finale</li>
+          <li class="pending">Art direction, audio, and the juice on the bank and bust moments</li>
+          <li class="pending">Teaching a new player any of the above</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>The honest gap</h3>
+        <p>The systems are in and the economy is tuned against a headless simulation harness rather than vibes. What is missing is the presentation layer and any explanation at all — a first-time player currently sees gorgeous physics and cannot tell you what they are supposed to want.</p>
+        <p>That is the next problem, and it is a known one.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>Critstorm · design bible in design.md</footer>
+</div>
+
+<div class="frame-strip"></div>
+
+<script>
+(() => {
+  const cv = document.getElementById('sim');
+  const ctx = cv.getContext('2d');
+  const W = 160, H = 90;          // cell grid; canvas is 2x this
+  const CELL = 2;
+
+  // materials
+  const EMPTY = 0, ROCK = 1, SAND = 2, MOLTEN = 3, GOLD = 4;
+
+  const grid = new Uint8Array(W * H);
+  const heat = new Float32Array(W * H);   // molten cooldown
+  const val  = new Float32Array(W * H);   // value carried by the cell
+
+  const idx = (x, y) => y * W + x;
+
+  // terrain: rock floor with a sand crust, mild rolling surface
+  let surf = 66;
+  for (let x = 0; x < W; x++) {
+    surf += (Math.sin(x * 0.13) + Math.sin(x * 0.41)) * 0.25;
+    const s = Math.round(Math.max(60, Math.min(72, surf)));
+    for (let y = s; y < H; y++) grid[idx(x, y)] = y < s + 3 ? SAND : ROCK;
+  }
+
+  // the collector: a drain mouth cut into the terrain
+  const COL_X = 112, COL_W = 12;
+  let colTop = 0;
+  for (let x = COL_X; x < COL_X + COL_W; x++) {
+    for (let y = 0; y < H; y++) {
+      if (grid[idx(x, y)] !== EMPTY) { colTop = colTop || y; break; }
+    }
+  }
+  for (let x = COL_X; x < COL_X + COL_W; x++)
+    for (let y = colTop; y < colTop + 6; y++) grid[idx(x, y)] = EMPTY;
+
+  const CORE = { x: 46, y: 40 };
+
+  // ballistic projectiles — eruptions fly on the presentation layer and only
+  // become grid cells on impact, exactly as the real game does it
+  let shots = [];
+  const stats = { erupted: 0, collected: 0, lost: 0 };
+
+  function erupt() {
+    const tier = Math.random() < 0.16 ? 3 + Math.floor(Math.random() * 4) : Math.floor(Math.random() * 3);
+    const n = 6 + tier * 3;
+    const payout = 4 * Math.pow(1.7, tier);
+    const aimX = COL_X + COL_W / 2 + (Math.random() - 0.5) * 46;
+    const aimY = colTop - 12;
+    const dx = aimX - CORE.x, dy = aimY - CORE.y;
+    for (let i = 0; i < n; i++) {
+      const spread = 0.09 + tier * 0.02;
+      shots.push({
+        x: CORE.x, y: CORE.y,
+        vx: dx * 0.033 + (Math.random() - 0.5) * spread * 6,
+        vy: dy * 0.033 - 0.9 + (Math.random() - 0.5) * spread * 4,
+        t: 220 + tier * 60,
+        v: payout / n
+      });
+    }
+    stats.erupted += payout;
+  }
+
+  function stepShots() {
+    const next = [];
+    for (const s of shots) {
+      s.vy += 0.055;
+      s.x += s.vx; s.y += s.vy;
+      const cx = Math.round(s.x), cy = Math.round(s.y);
+      if (cx < 0 || cx >= W || cy >= H) { stats.lost += s.v; continue; }
+      if (cy >= 0 && grid[idx(cx, cy)] !== EMPTY) {
+        // land one cell above whatever we hit
+        let ly = cy - 1;
+        while (ly > 0 && grid[idx(cx, ly)] !== EMPTY) ly--;
+        if (ly > 0) {
+          const i = idx(cx, ly);
+          grid[i] = MOLTEN; heat[i] = s.t; val[i] += s.v;
+        } else { stats.lost += s.v; }
+        continue;
+      }
+      next.push(s);
+    }
+    shots = next;
+  }
+
+  function move(a, b) {
+    grid[b] = grid[a]; heat[b] = heat[a]; val[b] = val[a];
+    grid[a] = EMPTY;   heat[a] = 0;       val[a] = 0;
+  }
+
+  function stepGrid() {
+    for (let y = H - 2; y >= 0; y--) {
+      const l2r = (y & 1) === 0;
+      for (let k = 0; k < W; k++) {
+        const x = l2r ? k : W - 1 - k;
+        const i = idx(x, y);
+        const m = grid[i];
+        if (m !== MOLTEN && m !== GOLD) continue;
+
+        if (m === MOLTEN) {
+          heat[i] -= 1.5;
+          if (heat[i] <= 0) grid[i] = GOLD;
+        }
+
+        const below = idx(x, y + 1);
+        if (grid[below] === EMPTY) { move(i, below); continue; }
+
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        let moved = false;
+        for (const d of [dir, -dir]) {
+          const nx = x + d;
+          if (nx < 0 || nx >= W) continue;
+          const diag = idx(nx, y + 1);
+          if (grid[diag] === EMPTY) { move(i, diag); moved = true; break; }
+        }
+        if (moved) continue;
+
+        // molten spreads sideways like a liquid; solid gold does not
+        if (grid[i] === MOLTEN) {
+          const nx = x + dir;
+          if (nx >= 0 && nx < W && grid[idx(nx, y)] === EMPTY) move(i, idx(nx, y));
+        }
+      }
+    }
+  }
+
+  function drain() {
+    // anything that falls past the collector mouth converts to essence
+    for (let x = COL_X; x < COL_X + COL_W; x++) {
+      for (let y = colTop; y < H; y++) {
+        const i = idx(x, y);
+        if (grid[i] === GOLD || grid[i] === MOLTEN) {
+          stats.collected += val[i];
+          grid[i] = EMPTY; heat[i] = 0; val[i] = 0;
+        }
+      }
+    }
+  }
+
+  const COLORS = {
+    [ROCK]: '#5f5c68',
+    [SAND]: '#c9b17a',
+    [GOLD]: '#e9b23c'
+  };
+
+  function draw() {
+    ctx.fillStyle = '#070605';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const m = grid[idx(x, y)];
+        if (m === EMPTY) continue;
+        if (m === MOLTEN) {
+          const t = Math.max(0, Math.min(1, heat[idx(x, y)] / 400));
+          ctx.fillStyle = `rgb(255, ${Math.round(120 + 110 * t)}, ${Math.round(40 + 40 * t)})`;
+        } else {
+          ctx.fillStyle = COLORS[m];
+        }
+        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      }
+    }
+
+    // collector mouth
+    ctx.fillStyle = '#3f8fa3';
+    ctx.fillRect(COL_X * CELL, colTop * CELL, COL_W * CELL, CELL);
+
+    // the core, glowing
+    const pulse = 3 + Math.sin(performance.now() / 320) * 0.6;
+    const g = ctx.createRadialGradient(CORE.x * CELL, CORE.y * CELL, 0, CORE.x * CELL, CORE.y * CELL, pulse * 5);
+    g.addColorStop(0, 'rgba(255,210,90,.95)');
+    g.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(CORE.x * CELL, CORE.y * CELL, pulse * 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffd25a';
+    for (const s of shots) ctx.fillRect(Math.round(s.x) * CELL, Math.round(s.y) * CELL, CELL, CELL);
+  }
+
+  const fmt = n => Math.round(n).toLocaleString('en-US');
+  const rE = document.getElementById('r-erupt');
+  const rC = document.getElementById('r-coll');
+  const rL = document.getElementById('r-lost');
+
+  function readout() {
+    rE.textContent = fmt(stats.erupted);
+    rC.textContent = fmt(stats.collected);
+    rL.textContent = fmt(stats.lost);
+  }
+
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (reduced) {
+    // a single settled frame instead of an animation
+    for (let i = 0; i < 30; i++) { erupt(); }
+    for (let i = 0; i < 400; i++) { stepShots(); stepGrid(); drain(); }
+    draw(); readout();
+  } else {
+    let last = 0, acc = 0;
+    const STEP = 1000 / 60;
+    let sinceErupt = 0;
+
+    function frame(now) {
+      if (!last) last = now;
+      acc += Math.min(100, now - last);
+      last = now;
+      while (acc >= STEP) {
+        acc -= STEP;
+        sinceErupt += STEP;
+        if (sinceErupt > 620) { sinceErupt = 0; erupt(); }
+        stepShots(); stepGrid(); drain();
+      }
+      draw(); readout();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
