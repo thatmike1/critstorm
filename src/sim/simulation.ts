@@ -110,6 +110,42 @@ export interface GoldLossEvent {
     cause: GoldLossCause;
 }
 
+/**
+ * a molten-gold cell freezing back to solid GOLD (MOLTEN_GOLD -> GOLD). the melt
+ * pair is the one transition that CARRIES value, so `amount` is the payload that
+ * survived the freeze — a settle tell can pitch itself by how rich the cell is.
+ * unlike {@link GoldLossEvent} this fires even at `amount === 0`: the event is the
+ * phase change itself (a painted, valueless pool still lands), not a ledger entry.
+ */
+export interface GoldSettleEvent {
+    x: number;
+    y: number;
+    amount: number;
+}
+
+/**
+ * which heat-driven phase transition a {@link PhaseChangeEvent} describes. mirrors
+ * {@link GoldLossCause}: one flat string discriminator so a subscriber can read a
+ * different tell per transition off a single seam.
+ * - `boil` — WATER flashes to STEAM at its boil point.
+ * - `quench` — LAVA meets coolant and crusts to STONE.
+ * - `ignite` — a flammable (gunpowder/oil/wood/plant) passes its ignition point.
+ */
+export type PhaseChangeKind = "boil" | "quench" | "ignite";
+
+/**
+ * a single heat-driven phase change: the cell (x,y), its `kind`, and the
+ * `material` the cell was BEFORE the transition (so `ignite` can tell gunpowder
+ * from wood). emitted the instant before the cell is rewritten, so a subscriber
+ * can flash/hiss at the exact spot.
+ */
+export interface PhaseChangeEvent {
+    x: number;
+    y: number;
+    kind: PhaseChangeKind;
+    material: number;
+}
+
 /** deterministic source used by seeded physical lightning. */
 export type SimulationRng = () => number;
 
@@ -169,6 +205,11 @@ export class Simulation {
     // renderer/audio layer turns that into a flash + blip so risk reads instantly.
     // null by default => the sim runs standalone with zero feedback overhead.
     private onGoldLoss: ((e: GoldLossEvent) => void) | null = null;
+    // sibling feedback seams to the gold-loss one above, same contract: the core
+    // only REPORTS (cell + what happened), a renderer/audio layer decides the tell.
+    // both are null by default so a headless run allocates no event objects at all.
+    private onGoldSettle: ((e: GoldSettleEvent) => void) | null = null;
+    private onPhaseChange: ((e: PhaseChangeEvent) => void) | null = null;
     private strikeRng: SimulationRng | null = null;
     private strikeChangedCells: Array<{ x: number; y: number }> | null = null;
     private strikeChangedSet: Set<number> | null = null;
@@ -427,6 +468,45 @@ export class Simulation {
         if (!this.onGoldLoss) return;
         if (!(amount > 0)) return;
         this.onGoldLoss({ x, y, amount, cause });
+    }
+
+    // ---- gold-settle + phase-change feedback seams --------------------------
+    // the same shape as the gold-loss seam above: one nullable listener slot each,
+    // fired from the transition site the instant the change happens. these are the
+    // *positive* counterparts — nothing is destroyed, so they carry no ledger term.
+
+    /** register (or clear with null) the gold-settle (MOLTEN_GOLD -> GOLD) listener. */
+    setGoldSettleListener(fn: ((e: GoldSettleEvent) => void) | null): void {
+        this.onGoldSettle = fn;
+    }
+
+    /** register (or clear with null) the heat-driven phase-change listener. */
+    setPhaseChangeListener(fn: ((e: PhaseChangeEvent) => void) | null): void {
+        this.onPhaseChange = fn;
+    }
+
+    /**
+     * announce that the molten gold at (x,y) has frozen back to solid GOLD, carrying
+     * the value that survived the freeze. fires unconditionally on the transition
+     * (including a zero payload — see {@link GoldSettleEvent}). no-op when no
+     * listener is attached, so headless runs allocate nothing.
+     */
+    private reportGoldSettle(x: number, y: number): void {
+        if (!this.onGoldSettle) return;
+        this.onGoldSettle({ x, y, amount: this.getValue(x, y) });
+    }
+
+    /**
+     * announce a heat-driven phase change at (x,y). called from the transition site
+     * BEFORE the cell is rewritten, so `material` is still the pre-change material.
+     * no-op when no listener is attached — the event object is only allocated for a
+     * subscriber, which keeps the hot per-cell update path free.
+     * @param kind which transition fired (see {@link PhaseChangeKind}).
+     * @param material the cell's material before the change.
+     */
+    private reportPhaseChange(x: number, y: number, kind: PhaseChangeKind, material: number): void {
+        if (!this.onPhaseChange) return;
+        this.onPhaseChange({ x, y, kind, material });
     }
 
     /** materials a bolt arcs *through* (and superheats) instead of stopping at. */
@@ -833,6 +913,7 @@ export class Simulation {
                 // flows while wet). stateless — re-arms the instant the water moves off.
                 if (this.nearWater(x, y)) return;
                 if (this.heat[i] >= ignitionPoint[Mat.GUNPOWDER]) {
+                    this.reportPhaseChange(x, y, "ignite", m);
                     this.explode(x, y);
                     return;
                 }
@@ -844,6 +925,7 @@ export class Simulation {
                 return;
             case Mat.OIL:
                 if (this.heat[i] >= ignitionPoint[Mat.OIL] && Math.random() < 0.3) {
+                    this.reportPhaseChange(x, y, "ignite", m);
                     this.setCell(x, y, Mat.FIRE);
                     return;
                 }
@@ -868,11 +950,14 @@ export class Simulation {
                 this.updateSteam(x, y, i);
                 return;
             case Mat.WOOD:
-                if (this.heat[i] >= ignitionPoint[Mat.WOOD] && Math.random() < 0.1)
+                if (this.heat[i] >= ignitionPoint[Mat.WOOD] && Math.random() < 0.1) {
+                    this.reportPhaseChange(x, y, "ignite", m);
                     this.setCell(x, y, Mat.FIRE);
+                }
                 return;
             case Mat.PLANT:
                 if (this.heat[i] >= ignitionPoint[Mat.PLANT] && Math.random() < 0.12) {
+                    this.reportPhaseChange(x, y, "ignite", m);
                     this.setCell(x, y, Mat.FIRE);
                     return;
                 }
@@ -970,6 +1055,7 @@ export class Simulation {
      */
     private updateWater(x: number, y: number, i: number, m: number): void {
         if (this.heat[i] >= boilPoint[Mat.WATER] && Math.random() < 0.4) {
+            this.reportPhaseChange(x, y, "boil", m);
             this.setCell(x, y, Mat.STEAM); // boil -> steam (carries the hot temp up)
             return;
         }
@@ -1140,6 +1226,7 @@ export class Simulation {
         // never be reached. Checked BEFORE re-emission so it reads the value last
         // frame's diffusion left behind (re-asserting first would pin it molten).
         if (coolantAdjacent && this.heat[i] < emitTemp[Mat.LAVA] - LAVA_QUENCH_DELTA) {
+            this.reportPhaseChange(x, y, "quench", Mat.LAVA);
             this.setCell(x, y, Mat.STONE);
             return;
         }
@@ -1275,6 +1362,9 @@ export class Simulation {
         }
         if (this.heat[i] <= freezePoint[Mat.MOLTEN_GOLD]) {
             this.setCell(x, y, Mat.GOLD); // value carried across by setCell
+            // settle tell AFTER the freeze: the payload survived the transition, so
+            // the event reports the value the now-solid cell actually holds.
+            this.reportGoldSettle(x, y);
             return;
         }
         this.updateLiquid(x, y, Mat.MOLTEN_GOLD);

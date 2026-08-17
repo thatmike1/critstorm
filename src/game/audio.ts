@@ -121,6 +121,15 @@ export function stepGoldTick(
     return stepThrottle(state, now, GOLD_TICK_LIMITS);
 }
 
+/**
+ * the phase-tell gates ({@link AudioEngine.quench} / {@link AudioEngine.ignite}).
+ * a boiling pool or a catching forest fires the sim seam on dozens of cells inside
+ * one step; these voices are broadband noise, so stacking them reads as a wall of
+ * static rather than as louder steam. the window cap collapses a front to a handful
+ * of bursts — the ear hears "a lot is boiling", which is the whole point.
+ */
+export const PHASE_LIMITS: ThrottleLimits = { minInterval: 0.07, window: 0.5, cap: 6 };
+
 /** drone pitch at coreLoad 0 (a low hum you feel more than hear). */
 export const SURGE_DRONE_BASE_HZ = 55;
 
@@ -205,6 +214,9 @@ export class AudioEngine {
     private noise: AudioBuffer | null = null;
     private goldTick: GoldTickState = newGoldTickState();
     private lightningThrottle: ThrottleState = newThrottleState();
+    // separate slots so a burning forest can't starve a steam hiss (and vice versa).
+    private quenchThrottle: ThrottleState = newThrottleState();
+    private igniteThrottle: ThrottleState = newThrottleState();
     private drone: { osc: OscillatorNode; sub: OscillatorNode; gain: GainNode } | null = null;
 
     /** browsers require a user gesture before audio; call this from any input handler */
@@ -346,12 +358,17 @@ export class AudioEngine {
      * as the flash boils off. `intensity` in [0,1] scales loudness and length, so a
      * single droplet ticks and a whole stream roars.
      *
-     * WIRING: the sim has no boil/quench event today — the phase changes happen
-     * inline in `Simulation.updateWater` (WATER→STEAM) and `Simulation.updateLava`
-     * (lava crust). Either add a listener seam mirroring `setGoldLossListener`, or
-     * call this from the frame loop off a steam-cell delta.
+     * self-throttling via {@link PHASE_LIMITS}: the sim fires the phase seam per
+     * CELL, so a boiling pool would otherwise stack dozens of noise bursts a step.
+     *
+     * WIRING: `Simulation.setPhaseChangeListener`, kinds `boil` (WATER→STEAM) and
+     * `quench` (lava crust), bridged by `attachSimAudio` in `src/game/sim-layer.ts`.
      */
     quench(intensity = 1): void {
+        if (this.muted || !this.ctx) return;
+        const gate = stepThrottle(this.quenchThrottle, this.ctx.currentTime, PHASE_LIMITS);
+        this.quenchThrottle = gate.state;
+        if (!gate.play) return;
         const k = clamp(intensity, 0, 1);
         const dur = 0.18 + k * 0.22;
         this.noiseBurst({
@@ -371,13 +388,17 @@ export class AudioEngine {
      * short noise puff. takes a seeded `rng` per the determinism convention; the
      * spark layout is {@link crackleSchedule}.
      *
-     * WIRING: ignition is emergent inside `Simulation.updateFlammable` / the per-
-     * material heat gates (`simulation.ts` ~lines 832–880) and emits no event. Needs
-     * a new sim seam (an ignition listener alongside `setGoldLossListener`) before
-     * this can fire on real ignitions.
+     * self-throttling via {@link PHASE_LIMITS}, so a whole tree catching in one step
+     * reads as one crackle instead of a pile-up.
+     *
+     * WIRING: `Simulation.setPhaseChangeListener`, kind `ignite` (the per-material
+     * heat gates), bridged by `attachSimAudio` in `src/game/sim-layer.ts`.
      */
     ignite(rng: () => number = Math.random): void {
         if (this.muted || !this.ctx) return;
+        const gate = stepThrottle(this.igniteThrottle, this.ctx.currentTime, PHASE_LIMITS);
+        this.igniteThrottle = gate.state;
+        if (!gate.play) return;
         this.noiseBurst({
             duration: 0.12,
             gain: 0.035,
@@ -395,9 +416,8 @@ export class AudioEngine {
      * and the call self-throttles via {@link stepGoldTick} — safe to call at tens of
      * hertz.
      *
-     * WIRING: MOLTEN_GOLD freezes to GOLD in `Simulation.updateMoltenGold`
-     * (`simulation.ts:1276`), which emits no event. Needs a settle listener on the
-     * sim (same shape as the gold-loss seam) carrying the cell's carried value.
+     * WIRING: `Simulation.setGoldSettleListener` (MOLTEN_GOLD→GOLD in
+     * `updateMoltenGold`), bridged by `attachSimAudio` in `src/game/sim-layer.ts`.
      */
     goldLand(value: number): void {
         if (this.muted || !this.ctx) return;

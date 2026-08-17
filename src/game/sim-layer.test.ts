@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Mat } from "../sim/materials";
 import { Simulation } from "../sim/simulation";
 import { DEFAULT_STEP_SEC } from "../../sim/storm-simulator";
-import { MAX_SIM_STEPS_PER_FRAME, SIM_STEP_SEC, bytesOf, drainFixedSteps } from "./sim-layer";
+import {
+    MAX_SIM_STEPS_PER_FRAME,
+    PHASE_QUENCH_INTENSITY,
+    SIM_STEP_SEC,
+    type SimAudioSink,
+    attachSimAudio,
+    bytesOf,
+    drainFixedSteps,
+} from "./sim-layer";
 
 // these tests cover the headless wiring the Pixi layer depends on: the zero-copy
 // byte view over the sim's scene buffer, and the fixed-timestep accumulator. the
@@ -104,5 +112,121 @@ describe("drainFixedSteps — fixed timestep", () => {
         const r = drainFixedSteps(0, 10_000, SIM_STEP_SEC, MAX_SIM_STEPS_PER_FRAME);
         expect(r.steps).toBe(MAX_SIM_STEPS_PER_FRAME);
         expect(r.accumulatorSec).toBe(0);
+    });
+});
+
+// ---- sim-event -> audio bridge -------------------------------------------
+// the sim owns the seams and stays presentation-free; these prove the game-side
+// subscriber routes each event to the right synth voice and unhooks cleanly.
+
+/** a recording stand-in for AudioEngine — no AudioContext needed. */
+function recorder(): SimAudioSink & { calls: { method: string; arg: number }[] } {
+    const calls: { method: string; arg: number }[] = [];
+    return {
+        calls,
+        quench: (intensity = 1) => calls.push({ method: "quench", arg: intensity }),
+        ignite: () => calls.push({ method: "ignite", arg: 0 }),
+        goldLand: (value: number) => calls.push({ method: "goldLand", arg: value }),
+    };
+}
+
+describe("attachSimAudio", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("routes a gold settle to goldLand with the carried value", () => {
+        const sim = new Simulation(W, H);
+        const audio = recorder();
+        attachSimAudio(sim, audio);
+        const x = 6;
+        const y = H - 1;
+        sim.paint(x, y, 0, Mat.MOLTEN_GOLD);
+        sim.addValue(x, y, 420);
+        sim.heat[y * W + x] = 0; // under the freeze gate
+
+        sim.step();
+
+        expect(audio.calls).toContainEqual({ method: "goldLand", arg: 420 });
+    });
+
+    it("routes a boil to quench at the light end of the intensity range", () => {
+        const sim = new Simulation(W, H);
+        const audio = recorder();
+        attachSimAudio(sim, audio);
+        const x = 6;
+        const y = H - 1;
+        sim.paint(x, y, 0, Mat.WATER);
+        sim.heat[y * W + x] = 600;
+
+        vi.spyOn(Math, "random").mockReturnValue(0.1);
+        sim.step();
+
+        expect(audio.calls).toContainEqual({ method: "quench", arg: PHASE_QUENCH_INTENSITY.boil });
+        expect(audio.calls.some((c) => c.method === "ignite")).toBe(false);
+    });
+
+    it("routes a lava crust to quench harder than a boil does", () => {
+        const sim = new Simulation(W, H);
+        const audio = recorder();
+        attachSimAudio(sim, audio);
+        const x = 6;
+        const y = H - 1;
+        sim.paint(x, y, 0, Mat.LAVA);
+        sim.paint(x - 1, y, 0, Mat.ICE);
+        sim.heat[y * W + x] = 300;
+
+        sim.step();
+
+        expect(audio.calls).toContainEqual({
+            method: "quench",
+            arg: PHASE_QUENCH_INTENSITY.quench,
+        });
+        expect(PHASE_QUENCH_INTENSITY.quench).toBeGreaterThan(PHASE_QUENCH_INTENSITY.boil);
+    });
+
+    it("routes an ignition to ignite, handing it the seeded rng", () => {
+        const sim = new Simulation(W, H);
+        const rng = () => 0.5;
+        const seen: (() => number)[] = [];
+        const audio: SimAudioSink = {
+            quench: () => {},
+            ignite: (r = Math.random) => {
+                seen.push(r);
+            },
+            goldLand: () => {},
+        };
+        attachSimAudio(sim, audio, rng);
+        const x = 6;
+        const y = H - 1;
+        sim.paint(x, y, 0, Mat.WOOD);
+        sim.heat[y * W + x] = 900;
+
+        vi.spyOn(Math, "random").mockReturnValue(0.05);
+        sim.step();
+
+        expect(seen).toEqual([rng]);
+    });
+
+    it("detach unsubscribes both seams and leaves the gold-loss seam alone", () => {
+        const sim = new Simulation(W, H);
+        const audio = recorder();
+        const losses: number[] = [];
+        sim.setGoldLossListener((e) => losses.push(e.amount));
+        const detach = attachSimAudio(sim, audio);
+
+        detach();
+
+        const x = 6;
+        const y = H - 1;
+        sim.paint(x, y, 0, Mat.MOLTEN_GOLD);
+        sim.addValue(x, y, 420);
+        sim.heat[y * W + x] = 0;
+        sim.step();
+        expect(audio.calls).toHaveLength(0);
+
+        // the storm lifecycle's ledger seam must survive the audio teardown.
+        sim.paint(x, y, 0, Mat.EMPTY);
+        expect(losses).toEqual([420]);
     });
 });

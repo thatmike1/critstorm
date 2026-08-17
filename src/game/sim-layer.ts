@@ -1,5 +1,5 @@
 import { BufferImageSource, Sprite, Texture } from "pixi.js";
-import type { Simulation } from "../sim/simulation";
+import type { PhaseChangeKind, Simulation } from "../sim/simulation";
 
 /**
  * fixed sim timestep in seconds (20 Hz). must match the headless storm harness
@@ -49,6 +49,59 @@ export function drainFixedSteps(
     // hit the cap with time to spare: discard the backlog instead of banking debt.
     if (acc > stepSec) acc = 0;
     return { steps, accumulatorSec: acc };
+}
+
+// ---- sim-event -> audio bridge ------------------------------------------------
+// the sim stays presentation-free: it exposes listener seams and knows nothing
+// about sound. this is the game-side subscriber that turns those events into synth
+// calls, kept as a plain function (no Pixi, no AudioContext) so it unit-tests.
+
+/**
+ * the slice of `AudioEngine` the sim-event bridge drives. structural, so a test can
+ * pass a recorder and the bridge never needs a real AudioContext.
+ */
+export interface SimAudioSink {
+    /** steam hiss; `intensity` in [0,1] scales loudness and length. */
+    quench(intensity?: number): void;
+    /** dry spark crackle from a seeded rng. */
+    ignite(rng?: () => number): void;
+    /** pentatonic tick for a gold cell settling with `value`. */
+    goldLand(value: number): void;
+}
+
+/**
+ * hiss intensity per phase-change kind. a single water cell flashing to steam is a
+ * tick; lava crusting against coolant is the fat end of the same voice, so it gets
+ * most of the range. `ignite` never reaches {@link SimAudioSink.quench}.
+ */
+export const PHASE_QUENCH_INTENSITY: Record<PhaseChangeKind, number> = {
+    boil: 0.35,
+    quench: 0.85,
+    ignite: 0,
+};
+
+/**
+ * subscribe a synth to the sim's gold-settle and phase-change seams (design §2
+ * feedback): MOLTEN_GOLD→GOLD ticks, WATER→STEAM and lava-crust hiss, flammables
+ * crackle. the returned function unsubscribes — call it on teardown so a replaced
+ * sim cannot leak a listener into the audio engine. does NOT touch the gold-loss
+ * seam, which the storm lifecycle owns.
+ * @param rng seeded source handed to the ignition crackle (determinism convention).
+ */
+export function attachSimAudio(
+    sim: Simulation,
+    audio: SimAudioSink,
+    rng: () => number = Math.random
+): () => void {
+    sim.setGoldSettleListener((e) => audio.goldLand(e.amount));
+    sim.setPhaseChangeListener((e) => {
+        if (e.kind === "ignite") audio.ignite(rng);
+        else audio.quench(PHASE_QUENCH_INTENSITY[e.kind]);
+    });
+    return () => {
+        sim.setGoldSettleListener(null);
+        sim.setPhaseChangeListener(null);
+    };
 }
 
 /**
