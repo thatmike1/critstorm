@@ -182,9 +182,9 @@ export function bustPot(
     // player watches, the rest rains onto the ground as the lasting hazard — scaled
     // up, since spectacle-sized mass spread along a floor obstructs nothing.
     const m = Math.max(1, eruptionMass(pot.value));
-    const spectacleShare = Math.min(m - 1, Math.round(m * BUST_FALLOUT_SHARE));
-    const coreCells = m - spectacleShare;
-    const falloutCells = spectacleShare * BUST_FALLOUT_SCALE;
+    const groundShare = Math.min(m - 1, Math.round(m * BUST_FALLOUT_SHARE));
+    const coreCells = m - groundShare;
+    const falloutCells = groundShare * BUST_FALLOUT_SCALE;
     let burnCells = 0;
 
     /** paint one burn cell, refusing to bury a wall or a valued gold cell. */
