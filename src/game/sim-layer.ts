@@ -1,5 +1,5 @@
 import { BufferImageSource, Sprite, Texture } from "pixi.js";
-import type { Simulation } from "../sim/simulation";
+import type { PhaseChangeKind, Simulation } from "../sim/simulation";
 
 /**
  * fixed sim timestep in seconds (20 Hz). must match the headless storm harness
@@ -51,6 +51,59 @@ export function drainFixedSteps(
     return { steps, accumulatorSec: acc };
 }
 
+// ---- sim-event -> audio bridge ------------------------------------------------
+// the sim stays presentation-free: it exposes listener seams and knows nothing
+// about sound. this is the game-side subscriber that turns those events into synth
+// calls, kept as a plain function (no Pixi, no AudioContext) so it unit-tests.
+
+/**
+ * the slice of `AudioEngine` the sim-event bridge drives. structural, so a test can
+ * pass a recorder and the bridge never needs a real AudioContext.
+ */
+export interface SimAudioSink {
+    /** steam hiss; `intensity` in [0,1] scales loudness and length. */
+    quench(intensity?: number): void;
+    /** dry spark crackle from a seeded rng. */
+    ignite(rng?: () => number): void;
+    /** pentatonic tick for a gold cell settling with `value`. */
+    goldLand(value: number): void;
+}
+
+/**
+ * hiss intensity per phase-change kind. a single water cell flashing to steam is a
+ * tick; lava crusting against coolant is the fat end of the same voice, so it gets
+ * most of the range. `ignite` never reaches {@link SimAudioSink.quench}.
+ */
+export const PHASE_QUENCH_INTENSITY: Record<PhaseChangeKind, number> = {
+    boil: 0.35,
+    quench: 0.85,
+    ignite: 0,
+};
+
+/**
+ * subscribe a synth to the sim's gold-settle and phase-change seams (design §2
+ * feedback): MOLTEN_GOLD→GOLD ticks, WATER→STEAM and lava-crust hiss, flammables
+ * crackle. the returned function unsubscribes — call it on teardown so a replaced
+ * sim cannot leak a listener into the audio engine. does NOT touch the gold-loss
+ * seam, which the storm lifecycle owns.
+ * @param rng seeded source handed to the ignition crackle (determinism convention).
+ */
+export function attachSimAudio(
+    sim: Simulation,
+    audio: SimAudioSink,
+    rng: () => number = Math.random
+): () => void {
+    sim.setGoldSettleListener((e) => audio.goldLand(e.amount));
+    sim.setPhaseChangeListener((e) => {
+        if (e.kind === "ignite") audio.ignite(rng);
+        else audio.quench(PHASE_QUENCH_INTENSITY[e.kind]);
+    });
+    return () => {
+        sim.setGoldSettleListener(null);
+        sim.setPhaseChangeListener(null);
+    };
+}
+
 /**
  * renders a headless {@link Simulation}'s pixel buffer as a nearest-neighbor
  * upscaled Pixi sprite — the bottom layer of the CritEngine stage. owns exactly
@@ -66,6 +119,8 @@ export class SimLayer {
     private readonly texture: Texture;
     /** unspent real-time carried between frames, drained in fixed sim steps. */
     private accumulatorSec = 0;
+    /** teardown for the live audio subscription; null when no synth is attached. */
+    private audioDetach: (() => void) | null = null;
 
     constructor(sim: Simulation) {
         this.sim = sim;
@@ -119,8 +174,32 @@ export class SimLayer {
         this.source.update();
     }
 
-    /** release the reused texture + its buffer source (the sprite is owned by the stage). */
+    /**
+     * subscribe a synth to this sim's event seams ({@link attachSimAudio}): settle
+     * ticks, boil/quench hisses, ignition crackles. the layer already owns the sim's
+     * presentation lifetime, so the subscription lives and dies with it. idempotent —
+     * attaching again REPLACES the previous subscription instead of stacking a second
+     * one, so a re-attach cannot double up the tells.
+     * @param rng seeded source for the ignition crackle (determinism convention).
+     */
+    attachAudio(audio: SimAudioSink, rng: () => number = Math.random): void {
+        this.detachAudio();
+        this.audioDetach = attachSimAudio(this.sim, audio, rng);
+    }
+
+    /** drop the audio subscription if one is live; safe when none ever attached. */
+    private detachAudio(): void {
+        this.audioDetach?.();
+        this.audioDetach = null;
+    }
+
+    /**
+     * release the reused texture + its buffer source (the sprite is owned by the
+     * stage) and unsubscribe any attached synth — a remounted storm builds a fresh
+     * layer, so leaving the old subscription live would stack tells on a dead sim.
+     */
     destroy(): void {
+        this.detachAudio();
         this.texture.destroy(true);
     }
 }

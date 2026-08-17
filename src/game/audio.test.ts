@@ -12,6 +12,7 @@ import {
     lightningCrackSchedule,
     newGoldTickState,
     newThrottleState,
+    PHASE_LIMITS,
     pentatonicFreq,
     stepGoldTick,
     stepThrottle,
@@ -196,6 +197,36 @@ describe("lightning throttle", () => {
     it("is sharper than the gold tick and never stacks more than a pair", () => {
         expect(LIGHTNING_LIMITS.minInterval).toBeGreaterThan(GOLD_TICK_MIN_INTERVAL);
         expect(LIGHTNING_LIMITS.cap).toBeLessThanOrEqual(2);
+    });
+});
+
+describe("phase-tell throttle", () => {
+    it("collapses a whole boiling front inside one step to a handful of hisses", () => {
+        let state = newThrottleState();
+        let played = 0;
+        // the sim fires the phase seam per CELL: 40 cells flashing at one clock.
+        for (let i = 0; i < 40; i++) {
+            const r = stepThrottle(state, 3, PHASE_LIMITS);
+            state = r.state;
+            if (r.play) played++;
+        }
+        expect(played).toBe(1);
+    });
+
+    it("caps a sustained front at the per-window budget", () => {
+        let state = newThrottleState();
+        let played = 0;
+        for (let i = 0; i < 200; i++) {
+            const r = stepThrottle(state, i * (PHASE_LIMITS.window / 200), PHASE_LIMITS);
+            state = r.state;
+            if (r.play) played++;
+        }
+        expect(played).toBe(PHASE_LIMITS.cap);
+    });
+
+    it("is looser than the lightning gate — steam is texture, not an event", () => {
+        expect(PHASE_LIMITS.cap).toBeGreaterThan(LIGHTNING_LIMITS.cap);
+        expect(PHASE_LIMITS.minInterval).toBeLessThan(LIGHTNING_LIMITS.minInterval);
     });
 });
 
