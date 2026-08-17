@@ -349,9 +349,18 @@ describe("competent late-storm pacing profile", () => {
         const overclock35 = overclock.samples.at(-1)!.coresPerMin;
         const baseline35 = baseline.samples.at(-1)!.coresPerMin;
         const noTurret35 = noTurret.samples.at(-1)!.coresPerMin;
+        // these two ratios are PINS ON THE TUNING COHORT, not validated floors.
+        // the overclock constants were tuned against exactly these 129 seeds, so
+        // asserting a 0.9 floor here only restated the tuning result. critstorm-5xo
+        // re-measured both on 3096 disjoint holdout seeds: all 24 holdout cohorts
+        // fell below 0.9 (median -0.107) and none reached 0.95 on the second ratio
+        // (best 0.72). they are pinned exactly so a balance change is still caught,
+        // and sim/overclock-holdout.test.ts carries the honest holdout measurement.
         const deficitClosed = (overclock35 - baseline35) / (noTurret35 - baseline35);
-        expect(deficitClosed).toBeGreaterThanOrEqual(0.9);
-        expect(overclock35 / noTurret35).toBeGreaterThanOrEqual(0.95);
+        expect(deficitClosed).toBeCloseTo(0.903656, 6);
+        expect(overclock35 / noTurret35).toBeCloseTo(0.966987, 6);
+        // the ceiling guardrail — automation never beats hands-on play — does hold
+        // on holdout too, so it stays a real assertion rather than a pin.
         expect(overclock35).toBeLessThan(noTurret35);
 
         for (const summary of overclockRuns) {
@@ -374,5 +383,7 @@ describe("competent late-storm pacing profile", () => {
             );
             expect(summary.hazardModel).toBe("surge-bust-only");
         }
-    });
+        // three 129-seed sweeps of 35-minute storms; ~3.5s of cpu alone, and more
+        // under parallel load, so it needs an explicit budget over the 5s default.
+    }, 60_000);
 });
