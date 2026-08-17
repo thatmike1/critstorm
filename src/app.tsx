@@ -367,6 +367,9 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             // subscribe this storm's stat tracker to the sim's gold-loss ledger so
             // the results screen can report gold lost to hazards (npq.2).
             lifecycleRef.current.attach(e.simulation);
+            // and the synth to the sim's event seams: gold settling, steam, ignition.
+            // released by the engine's destroy() in this effect's cleanup.
+            e.attachAudio(audioRef.current);
             // legacy ?lv dev-cheat migration: levels granted without a placement
             // click get the historical fixed spot beside the strike zone.
             const striker = autoStrikerRef.current;

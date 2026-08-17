@@ -119,6 +119,8 @@ export class SimLayer {
     private readonly texture: Texture;
     /** unspent real-time carried between frames, drained in fixed sim steps. */
     private accumulatorSec = 0;
+    /** teardown for the live audio subscription; null when no synth is attached. */
+    private audioDetach: (() => void) | null = null;
 
     constructor(sim: Simulation) {
         this.sim = sim;
@@ -172,8 +174,32 @@ export class SimLayer {
         this.source.update();
     }
 
-    /** release the reused texture + its buffer source (the sprite is owned by the stage). */
+    /**
+     * subscribe a synth to this sim's event seams ({@link attachSimAudio}): settle
+     * ticks, boil/quench hisses, ignition crackles. the layer already owns the sim's
+     * presentation lifetime, so the subscription lives and dies with it. idempotent —
+     * attaching again REPLACES the previous subscription instead of stacking a second
+     * one, so a re-attach cannot double up the tells.
+     * @param rng seeded source for the ignition crackle (determinism convention).
+     */
+    attachAudio(audio: SimAudioSink, rng: () => number = Math.random): void {
+        this.detachAudio();
+        this.audioDetach = attachSimAudio(this.sim, audio, rng);
+    }
+
+    /** drop the audio subscription if one is live; safe when none ever attached. */
+    private detachAudio(): void {
+        this.audioDetach?.();
+        this.audioDetach = null;
+    }
+
+    /**
+     * release the reused texture + its buffer source (the sprite is owned by the
+     * stage) and unsubscribe any attached synth — a remounted storm builds a fresh
+     * layer, so leaving the old subscription live would stack tells on a dead sim.
+     */
     destroy(): void {
+        this.detachAudio();
         this.texture.destroy(true);
     }
 }

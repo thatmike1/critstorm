@@ -7,6 +7,7 @@ import {
     PHASE_QUENCH_INTENSITY,
     SIM_STEP_SEC,
     type SimAudioSink,
+    SimLayer,
     attachSimAudio,
     bytesOf,
     drainFixedSteps,
@@ -228,5 +229,64 @@ describe("attachSimAudio", () => {
         // the storm lifecycle's ledger seam must survive the audio teardown.
         sim.paint(x, y, 0, Mat.EMPTY);
         expect(losses).toEqual([420]);
+    });
+});
+
+// ---- SimLayer audio lifetime ---------------------------------------------
+// the layer owns the subscription for the life of the storm. StormView remounts
+// per run, so a missed detach would stack tells from every previous storm.
+
+/** drop a valued molten pool at (x,y) and cool it under the freeze gate. */
+function settleGold(sim: Simulation, x: number, y: number, value: number): void {
+    sim.paint(x, y, 0, Mat.MOLTEN_GOLD);
+    sim.addValue(x, y, value);
+    sim.heat[y * sim.W + x] = 0;
+    sim.step();
+}
+
+describe("SimLayer audio lifetime", () => {
+    it("attachAudio subscribes the layer's own sim", () => {
+        const sim = new Simulation(W, H);
+        const layer = new SimLayer(sim);
+        const audio = recorder();
+
+        layer.attachAudio(audio);
+        settleGold(sim, 6, H - 1, 420);
+
+        expect(audio.calls).toEqual([{ method: "goldLand", arg: 420 }]);
+        layer.destroy();
+    });
+
+    it("attaching twice replaces the subscription instead of stacking it", () => {
+        const sim = new Simulation(W, H);
+        const layer = new SimLayer(sim);
+        const first = recorder();
+        const second = recorder();
+
+        layer.attachAudio(first);
+        layer.attachAudio(second);
+        settleGold(sim, 6, H - 1, 420);
+
+        // exactly one tell, and it went to the surviving subscriber.
+        expect(first.calls).toHaveLength(0);
+        expect(second.calls).toEqual([{ method: "goldLand", arg: 420 }]);
+        layer.destroy();
+    });
+
+    it("destroy unsubscribes, so a dead layer's sim makes no sound", () => {
+        const sim = new Simulation(W, H);
+        const layer = new SimLayer(sim);
+        const audio = recorder();
+
+        layer.attachAudio(audio);
+        layer.destroy();
+        settleGold(sim, 6, H - 1, 420);
+
+        expect(audio.calls).toHaveLength(0);
+    });
+
+    it("destroy is safe when no synth was ever attached", () => {
+        const layer = new SimLayer(new Simulation(W, H));
+        expect(() => layer.destroy()).not.toThrow();
     });
 });

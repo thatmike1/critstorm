@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import { formatNumber } from "./format";
 import { createWorld, type World } from "./world";
-import { SimLayer } from "./sim-layer";
+import { SimLayer, type SimAudioSink } from "./sim-layer";
 import type { Simulation } from "../sim/simulation";
 import { bankBurstCount, bankVolleyShares, depositEruption } from "./eruption";
 import { bustPot } from "./bust";
@@ -195,6 +195,19 @@ export class CritEngine {
     /** the headless falling-sand simulation backing the storm world. */
     get simulation(): Simulation {
         return this.world.sim;
+    }
+
+    /**
+     * hand the app's synth to the sim's event seams (design §2 feedback): gold
+     * settling ticks, boil/quench hisses, ignition crackles. deliberately NOT a
+     * constructor argument — the engine is built by {@link create} before the React
+     * tree can hand its AudioEngine down, and a storm must still run silent if none
+     * ever arrives. safe to call twice (the subscription is replaced, not stacked);
+     * released by {@link destroy}, so a remounted storm cannot leak a live listener
+     * onto a dead sim.
+     */
+    attachAudio(audio: SimAudioSink): void {
+        this.simLayer.attachAudio(audio);
     }
 
     /**
@@ -667,7 +680,9 @@ export class CritEngine {
     destroy(): void {
         this.app.destroy(true, { children: true });
         // app.destroy(children) tears down the sprite but leaves textures alone;
-        // release the sim's reused texture + buffer source explicitly.
+        // release the sim's reused texture + buffer source explicitly. this is also
+        // what drops any synth attached via attachAudio, so a remounted storm starts
+        // from a single clean subscription.
         this.simLayer.destroy();
     }
 }
