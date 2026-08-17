@@ -71,7 +71,13 @@ export function fullStrokeCellCount(brush: BrushDef): number {
     return cells;
 }
 
-/** return the essence price of one unobstructed full stroke. */
+/**
+ * return the essence price of one unobstructed full stroke at the brush's
+ * catalogue price — i.e. UNDISCOUNTED. only correct for callers that hold no
+ * workshop effects (the headless sim harness); anything running a real storm must
+ * price a stroke off `brushCostWith(fx, brush)` so the Aegis brush-cost nodes
+ * (design §5) reach the charge.
+ */
 export function fullStrokeCost(brush: BrushDef): number {
     return fullStrokeCellCount(brush) * brush.costPerCell;
 }
@@ -92,7 +98,10 @@ function paintable(sim: Simulation, x: number, y: number, mat: number): boolean 
 
 /**
  * paint a filled disc of `brush` centred on grid cell (cx,cy), charging
- * `costPerCell` in essence for each cell actually painted. per-cell pricing
+ * `costPerCell` in essence for each cell actually painted. `costPerCell` is the
+ * EFFECTIVE price and is passed in rather than read off the brush, so permanent
+ * Aegis discounts apply: live callers supply `brushCostWith(fx, brush)`, never
+ * `brush.costPerCell`. per-cell pricing
  * (design §4.2): every painted cell is deducted from essence, and painting stops
  * as soon as the next cell can't be afforded — you can't paint what you can't pay
  * for. value is never destroyed: gold/molten-gold and wall cells are skipped (and
