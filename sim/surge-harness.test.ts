@@ -108,7 +108,9 @@ describe("surge harness — bank/ride EV (design.md §3/§6)", () => {
         for (let n = 2; n <= 6; n++) expect(ev[n]).toBeGreaterThan(ev[n - 1]);
         // …then greed detonates the pot: banking at 7 is far worse than at the peak.
         expect(ev[7]).toBeLessThan(ev[6] * 0.5);
-    });
+        // a 9-point EV sweep runs ~2.8s alone and shares the pool with the sim-heavy
+        // storm-bot and overclock-holdout files, so it needs a budget over the 5s default.
+    }, 60_000);
 
     it("the EV-maximizing bank point lands at n≈6 (design §3)", () => {
         // wave-5b pacing tune (critstorm-4cz.3): with CORE_CRITICAL_TEMP=620 and
@@ -117,7 +119,8 @@ describe("surge harness — bank/ride EV (design.md §3/§6)", () => {
         // toll cooked the ride two crits early.
         const ev = Array.from({ length: 9 }, (_, n) => expectedBankedEssence(bankAtN, n, REF));
         expect(evArgmax(ev)).toBe(6);
-    });
+        // same 9-point sweep as above (~2.2s); same reason for the explicit budget.
+    }, 60_000);
 });
 
 describe("surge harness — bust hazard shape (design.md §6)", () => {
