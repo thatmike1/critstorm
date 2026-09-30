@@ -35,7 +35,7 @@ Before the last message of a session:
 1. File a bead for anything left over, and close the finished ones.
 2. Run the quality gate if code changed: `npx vitest run` and `npx tsc --noEmit`.
 3. Mirror issues to GitHub: `GITHUB_TOKEN=$(gh auth token) bd github sync --push-only` (beads is the source of truth; GitHub is a read-only mirror — never close issues on GitHub directly).
-4. Commit, and once the work is finished and verified, push. One exception: a push to `main` deploys the live site to GitHub Pages (`.github/workflows/deploy.yml`), so ask Mike before pushing `main`. Any other branch pushes freely.
+4. Commit, and once the work is finished and verified, push, `main` included: it redeploys the live site to GitHub Pages (`.github/workflows/deploy.yml`), and that needs no asking.
 5. Hand off: what changed, what was verified, what the next session picks up.
 <!-- END BEADS INTEGRATION -->
 
