@@ -46,6 +46,10 @@ export function bustTriggersBlowUp(
 export interface StormSummary extends StormEndAccounting {
     /** exposed gold explicitly abandoned when the storm ends. */
     goldLeftBehind?: number;
+    /** pre-Forge pot that completed the Eye, if any. */
+    finalBank?: number;
+    bestBank?: number;
+    seed?: number;
     /** gold value lost to hazards this storm (acid, lava, erase, busted pots). */
     goldLost: number;
     /** surges ignited this storm. */

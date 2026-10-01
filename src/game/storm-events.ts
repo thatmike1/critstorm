@@ -219,6 +219,8 @@ export class StormEvents {
     totalErupted = 0;
     private nextEventAt = INITIAL_STORM_EVENT_CADENCE;
     private nextType: StormEventType;
+    private nextEyeLightningAt = 4;
+    private readonly eyeRng: StormEventRng;
 
     constructor(
         private readonly world: World,
@@ -226,11 +228,13 @@ export class StormEvents {
         private readonly upgrades: readonly StormEventModifier[] = []
     ) {
         this.nextType = chooseStormEventType(rng, world.front.eventWeights);
+        this.eyeRng = world.front.id === "eye" ? createStormEventRng(Math.floor(rng() * 0xffff_ffff)) : rng;
     }
 
     /** forecast the next physical event so preparation is an actual choice. */
     get forecast(): { type: StormEventType; at: number } {
-        return { type: this.nextType, at: this.nextEventAt };
+        return this.world.front.id === "eye" && this.nextEyeLightningAt < this.nextEventAt
+            ? { type: "lightning-front", at: this.nextEyeLightningAt } : { type: this.nextType, at: this.nextEventAt };
     }
 
     /**
@@ -257,6 +261,14 @@ export class StormEvents {
             events.push(timedEvent);
             this.totalErupted += timedEvent.erupted;
             this.nextEventAt += stormEventCadence(scheduledAt) / modifiers.riskMult;
+        }
+        if (this.world.front.id === "eye") {
+            while (elapsed >= this.nextEyeLightningAt) {
+                const event = triggerStormEvent(this.world, "lightning-front", 1, this.eyeRng);
+                events.push({ ...event, elapsed: this.nextEyeLightningAt });
+                this.nextEyeLightningAt += 6;
+            }
+            events.sort((a, b) => a.elapsed - b.elapsed);
         }
         return events;
     }

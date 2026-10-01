@@ -341,7 +341,7 @@ export function executeResolvedStrike(
     if (surge.addHeat(heat)) callbacks.onSurgeStart();
     const effective = surge.resolveResult(result);
     applyAttack(economy, effective);
-    const captured = surge.recordStrike(effective, baseDamage(economy));
+    const captured = surge.recordStrike(effective, baseDamage(economy), result.tier);
     if (captured && source === "automatic" && surge.active) {
         surge.addExternalCoreHeat(capturedAutoCoreHeat);
     }

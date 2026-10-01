@@ -363,9 +363,9 @@ const FRONT_NODES: readonly WorkshopNodeDef[] = [
         effect: { kind: "surge-tier-floor", floor: 4 },
     },
     {
-        name: "The Glacier",
-        desc: "unlock storm front 4",
-        effect: { kind: "unlock-front", front: 4 },
+        name: "Gilded Horizon",
+        desc: "gold rain lands ×1.25 heavier",
+        effect: { kind: "event-modifier", modifier: { event: "gold-rain", severityMultiplier: 1.25 } },
     },
     {
         name: "Inert Drizzle",

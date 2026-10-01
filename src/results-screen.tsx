@@ -24,16 +24,17 @@ export interface ResultsScreenProps {
 
 /** the pixel-native storm results screen: how it ended, what it paid, what's next. */
 export function ResultsScreen({ summary, onNextStorm }: ResultsScreenProps) {
-    const banked = summary.reason === "bank-out";
+    const banked = summary.reason !== "blow-up";
+    const won = summary.reason === "victory";
     const flooredCores = summary.rawCores === 0 && summary.cores > 0;
     return (
         <div className="results">
             <div className={banked ? "results-panel" : "results-panel bust"}>
                 <h1 className={banked ? "results-title" : "results-title bust"}>
-                    {banked ? "BANKED OUT" : "BLOWN UP"}
+                    {won ? "CRITSTORM COMPLETE" : banked ? "BANKED OUT" : "BLOWN UP"}
                 </h1>
                 <p className="results-lesson">
-                    {banked
+                    {won ? "You banked the Eye. The sky turned to gold. Every fortune has an ending." : banked
                         ? "you quit while ahead — the storm pays a ×1.5 core bonus for it."
                         : "the storm ate your unbanked gold. banking out keeps a ×1.5 core bonus."}
                 </p>
@@ -72,8 +73,13 @@ export function ResultsScreen({ summary, onNextStorm }: ResultsScreenProps) {
                         <span className="results-val">{formatDuration(summary.durationSec)}</span>
                     </div>
                 </div>
+                {won && <div className="credits"><strong>THE FINAL BANK: {formatNumber(summary.finalBank ?? 0)}</strong>
+                    <p>CRITSTORM · a game about knowing when to stop.</p>
+                    <p>Mike & the CRITSTORM crew<br />React · PixiJS · falling sand · a little greed</p>
+                    <span>Thanks for riding the storm.</span>
+                </div>}
                 <button className="next-storm-btn" onClick={onNextStorm}>
-                    NEXT STORM
+                    {won ? "BACK TO THE WORKSHOP" : "NEXT STORM"}
                 </button>
             </div>
         </div>

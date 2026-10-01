@@ -1388,3 +1388,17 @@ button:disabled .upgrade-cost {
 .tool-dock em { font: 14px var(--font-num); }
 .tool-dock > span { font: 16px var(--font-num); color: var(--ink); background: var(--black); padding: 5px; }
 .tool-cursor { position: absolute; z-index: 8; pointer-events: none; border: 2px dashed #9af0ff; padding: 8px; transform: translate(-50%, -50%); color: #9af0ff; font: 15px var(--font-num); background: #120204b0; }
+
+.finale-banner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 12; pointer-events: none; background: linear-gradient(transparent, #1c0f00aa); }
+.finale-banner strong { font-family: var(--font-title); font-size: clamp(24px, 5vw, 64px); color: #fff4b8; text-shadow: 4px 4px #7c3400, 0 0 30px #ffa800; }
+.finale-banner span { margin-top: 24px; color: var(--gold); letter-spacing: 4px; }
+.finale-banner p { font-family: var(--font-num); font-size: 28px; }
+.stage.ending .stage-guide, .stage.ending .world-label, .stage.ending .tool-dock { opacity: 0; }
+.credits { border-top: 2px solid #72561d; padding: 20px 0; color: #e6cc8e; font-family: var(--font-num); font-size: 20px; }
+.credits strong { color: var(--gold); font-size: 24px; }
+.front-options { grid-template-columns: repeat(3, 1fr); }
+
+.layout:has(.stage.ending) .hud { pointer-events: none; opacity: 0.65; }
+.stage.ending { pointer-events: none; }
+
+.final-target { color: var(--gold); background: #190d06; border: 1px solid #b88524; padding: 12px; margin-bottom: 12px; font-family: var(--font-num); font-size: 19px; line-height: 1.2; }

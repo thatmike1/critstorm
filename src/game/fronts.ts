@@ -2,11 +2,10 @@ import type { StormEventType } from "./storm-events";
 
 // storm fronts (design §4.5): meta-selected arenas defined as plain data —
 // terrain composition hooks, the storm-event mix, and payout/risk multipliers.
-// v1 ships the flats (tutorial) and the bog; the eye and glacier are
-// finale/post-v1 and intentionally absent here.
+// v1 ships the Flats, Bog and Eye. Glacier remains outside the finite arc.
 
 /** identifiers for the meta-selected storm fronts (design §4.5). */
-export type FrontId = "flats" | "bog";
+export type FrontId = "flats" | "bog" | "eye";
 
 /** relative pick weights per storm event type, consumed by the event scheduler. */
 export type StormEventWeights = Readonly<Record<StormEventType, number>>;
@@ -98,9 +97,15 @@ const BOG: FrontDef = {
 };
 
 /** every shippable front, keyed by id. */
-export const FRONTS: Readonly<Record<FrontId, FrontDef>> = { flats: FLATS, bog: BOG };
+const EYE: FrontDef = {
+    id: "eye", ordinal: 3, name: "The Eye",
+    terrain: { oilPockets: null, plantPatches: null },
+    eventWeights: { "gold-rain": 0.45, "acid-drizzle": 0.1, "lava-fissure": 0.15, "lightning-front": 0.3 },
+    modifiers: { payoutMult: 1.5, riskMult: 2 },
+};
+export const FRONTS: Readonly<Record<FrontId, FrontDef>> = { flats: FLATS, bog: BOG, eye: EYE };
 
-const FRONT_IDS: readonly FrontId[] = ["flats", "bog"];
+const FRONT_IDS: readonly FrontId[] = ["flats", "bog", "eye"];
 
 /** return only implemented fronts unlocked by the purchased Front ladder. */
 export function availableFronts(unlockedFronts: number): readonly FrontDef[] {

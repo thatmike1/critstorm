@@ -182,6 +182,13 @@ export function createWorld(opts: WorldOptions = {}): World {
         seedPlantPatches(sim, surface, front.terrain.plantPatches, mulberry32(seed ^ 0x3c6ef372));
     }
 
+    // the Eye's floor is a physical lava sheet; the player must quench a route.
+    if (front.id === "eye") {
+        for (let x = 0; x < width; x++) {
+            for (let y = surface[x]; y < Math.min(height, surface[x] + 3); y++) sim.paint(x, y, 0, Mat.LAVA);
+        }
+    }
+
     // core: horizontally centred, sitting `coreAboveFloor` cells above the floor
     // surface at its own column — guaranteed open air above the terrain. clamp
     // into the grid: never above row 0, and always at least one cell above the

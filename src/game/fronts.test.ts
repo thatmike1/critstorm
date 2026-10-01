@@ -50,7 +50,7 @@ describe("availableFronts", () => {
     it("returns only implemented fronts at or below the unlocked ordinal", () => {
         expect(availableFronts(1).map((front) => front.id)).toEqual(["flats"]);
         expect(availableFronts(2).map((front) => front.id)).toEqual(["flats", "bog"]);
-        expect(availableFronts(4).map((front) => front.id)).toEqual(["flats", "bog"]);
+        expect(availableFronts(4).map((front) => front.id)).toEqual(["flats", "bog", "eye"]);
     });
 });
 
@@ -71,7 +71,7 @@ describe("resolveFrontSelection", () => {
 describe("front picker model", () => {
     it("keeps a locked Bog visible but not selectable", () => {
         const options = frontPickerOptions(1, "flats");
-        expect(options.map((option) => option.front.id)).toEqual(["flats", "bog"]);
+        expect(options.map((option) => option.front.id)).toEqual(["flats", "bog", "eye"]);
         expect(options[0]).toMatchObject({ locked: false, selected: true });
         expect(options[1]).toMatchObject({ locked: true, selected: false });
     });
@@ -120,7 +120,7 @@ describe("frontFromQuery", () => {
     it("returns null when absent or unknown", () => {
         expect(frontFromQuery("")).toBeNull();
         expect(frontFromQuery("?debug=1")).toBeNull();
-        expect(frontFromQuery("?front=eye")).toBeNull();
+        expect(frontFromQuery("?front=eye")).toBe("eye");
         expect(frontFromQuery("?front=")).toBeNull();
     });
 });

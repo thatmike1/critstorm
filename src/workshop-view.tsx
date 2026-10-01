@@ -155,7 +155,7 @@ export function WorkshopView({
             {lastStorm && (
                 <div className="storm-yield">
                     <span className="yield-reason">
-                        {lastStorm.reason === "bank-out" ? "BANKED OUT ×1.5" : "BLOWN UP"}
+                        {lastStorm.reason === "victory" ? "CRITSTORM COMPLETE" : lastStorm.reason === "bank-out" ? "BANKED OUT ×1.5" : "BLOWN UP"}
                     </span>
                     <span className="yield-detail">
                         {formatNumber(lastStorm.bankedEssence)} essence collected →{" "}
@@ -193,7 +193,7 @@ export function WorkshopView({
                         >
                             <span className="front-option-name">{option.front.name}</span>
                             <span className="front-option-detail">
-                                {option.front.id === "flats" ? "Open ground · learn to route gold" : "Oil & plants · ×1.25 yield · faster hazards"}
+                                {option.front.id === "flats" ? "Open ground · learn to route gold" : option.front.id === "bog" ? "Oil & plants · ×1.25 yield · faster hazards" : "Lava floor · lightning every 6s · bank 10B with a tier 8 crit to win"}
                             </span>
                             <span className="front-option-detail">
                                 {option.locked

@@ -18,9 +18,20 @@ Clicking fills a heat meter. At 100 a **surge** starts: every crit pumps a pot m
 (`1.5^n`) and injects a heat spike scaled by its tier. Ambient heat also climbs on its own, so you
 can't wait it out. Bank the pot, or ride one more crit.
 
-A storm runs 8–35 minutes and ends one of two ways: **bank out** voluntarily (+50% core bonus) or
+Storm pressure grows with time. Leave in one of two ways: **bank out** voluntarily (+50% core bonus) or
 **blow up** and lose the unbanked gold. Storm cores buy permanent upgrades in the workshop between
-runs.
+runs. Unlock the Bog, then the Eye. In the Eye, bank one pot of at least **10B** containing an
+actual **tier 8** strike to trigger the golden finale and credits. The pot multiplier is unbounded;
+workshop tier floors do not count as the actual tier 8. A Lightning Rod can catch one for you.
+
+**Space** banks a live surge. **Escape** returns from painting to striking. Ice and Water near the
+core provide temporary heat headroom; melting or boiling removes it. Additional collectors open
+new routes, and polishing reduces their skim. Collected essence—not your unspent balance—earns
+cores. Gold left on the field at departure stays behind.
+
+For reproducible checks use `?seed=42`; `?front=eye` and `?lv=base,chance,multi,auto,golden` are QA
+shortcuts. `npm run sim -- --mode routing` measures paid routes/coolant;
+`npm run sim -- --mode finale` checks the winning bank and Eye physics budget.
 
 **Core invariant:** value is conserved. It moves with cells (Lagrangian carry, via swap paths —
 never `setCell`), and every source and sink is accounted for in the ledger.

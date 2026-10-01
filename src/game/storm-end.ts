@@ -1,7 +1,7 @@
 import { coresFromEssence, type EconomyState } from "./economy";
 
 /** the reason a storm ended; distinct from the bank/bust exits of one surge. */
-export type StormEndReason = "bank-out" | "blow-up";
+export type StormEndReason = "bank-out" | "blow-up" | "victory";
 
 /** voluntary storm endings multiply converted cores after the square-root formula. */
 export const BANK_OUT_CORE_MULTIPLIER = 1.5;
@@ -35,7 +35,7 @@ export function markFirstSurge(state: EconomyState): void {
 export function endStorm(state: EconomyState, reason: StormEndReason): StormEndAccounting {
     const rawCores = coresFromEssence(state.bankedEssence);
     const protectedCores = state.reachedFirstSurge ? Math.max(rawCores, 1) : rawCores;
-    const coreMultiplier = reason === "bank-out" ? BANK_OUT_CORE_MULTIPLIER : 1;
+    const coreMultiplier = reason !== "blow-up" ? BANK_OUT_CORE_MULTIPLIER : 1;
     return {
         reason,
         bankedEssence: state.bankedEssence,

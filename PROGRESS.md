@@ -7,7 +7,7 @@ Branch: `feat/finish`. Main must never be pushed. User workflow is sequential un
 0. **Assessment — complete** (`critstorm-hio.1`). Read the project; baseline tests/build/default sim; full headless storm and screenshots; section-by-section audit; commit and push this plan before implementation.
 1. **A reason for the next click — complete.** (`critstorm-hio.2`) Visible resting core and collector labels; first-run instructions; successive storm goals and core-yield preview; useful workshop/front previews; seed production streams and use fixed game steps. Verify fresh pacing and an unassisted opening through its first bank.
 2. **Build your own gold machine — complete.** Ice/Wall unlocks, additional collectors and fee upgrades; real Vault drains and Front event modifiers; tool feedback and event forecast. Account for blocked payouts. Measure collection and hazard exposure with the harness; inspect painted tools and installed routing in Chromium.
-3. **Chase the Eye and finish the game — planned.** Third arena with lava/lightning, honest v1 workshop ladder, visible final bank requirement, conserved golden finale, terminal stats/credits and replay. Measure feasible finale banks and Eye performance; browser-check ordinary, failed and winning exits.
+3. **Chase the Eye and finish the game — complete.** Third arena with lava/lightning, honest v1 workshop ladder, visible final bank requirement, conserved golden finale, terminal stats/credits and replay. Measure feasible finale banks and Eye performance; browser-check ordinary, failed and winning exits.
 4. **Make greed feel enormous — planned.** Camera impact, presentation hit-stop, crit tier typography, bounded sparks/trails, synthesized bank-out/rupture feedback, delayed blow-up so the disaster stays visible, motion/audio control. Capture bank, bust, results and narrow-screen layouts.
 5. **Own flair: a storm worth remembering — planned (last unit).** Add one or two original ideas that deepen voluntary risk and personal storm history; state the rationale here. Measure rewards/costs if balance changes; verify persistence and complete a final end-to-end run. Write the final summary at the top, gate, commit, push and clean up browser/server/scratch artifacts.
 
@@ -23,7 +23,7 @@ Branch: `feat/finish`. Main must never be pushed. User workflow is sequential un
 
 ## Next action
 
-Units 0–2 are complete. Next is unit 3 (`critstorm-hio.4`): the Eye, final bank and credits. Juice .5 and flair .6 follow in order.
+Units 0–2 are complete. Next is unit 4 (`critstorm-hio.5`): impact, sound, exits and narrow-screen play. Own flair .6 follows.
 
 ## Unit 1 — a reason for the next click
 
@@ -46,3 +46,13 @@ Units 0–2 are complete. Next is unit 3 (`critstorm-hio.4`): the Eye, final ban
 - Fresh pacing still **62.4s** to surge / **81.1s** to Stone / **13.06K** collected at 120s, one bank/no bust. Legacy cohort balance pins remain intact; their known holdout limitations from assessment still apply.
 - Chromium: isolated late workshop fixture installed four visible drains, 130 coolant headroom and 4% fee; inspected Ice/Wall, actual acid forecast, and results with **79 exposed gold left behind**. No page errors. Captures remain temporary.
 - Gate: **492 tests / 35 files** passed (60.78s); type-check and production build passed (14.31s, 570.95 kB entry / 179.87 kB gzip). Closed the existing airborne-drain bug as well as this unit bead.
+
+## Unit 3 — chase the Eye and finish the game
+
+- Implemented the third workshop front: a three-cell lava floor (960 physical lava cells), stronger yield/pressure, and isolated seeded lightning at 4s then every 6s. The picker previews its danger and final objective.
+- A bank wins only in the Eye, with a pre-Forge pot ≥ the final rank's **10B** threshold and an actual tier-eight strike. Pot snapshots remember the highest actual tier and clear it each surge. The surge multiplier remains unbounded. Permanent tier floors cannot counterfeit the final crit; the purchased Lightning Rod can produce it through its real event path.
+- The winning pot erupts once into 24 seeded screen-wide bursts, shares sum to the pot, and physical mass stays ≤1,536 cells. Eight seconds of visible gold physics/collection precede terminal accounting, credits and workshop replay. Victory uses the voluntary core bonus and never credits uncollected gold as essence.
+- Replaced the saved Glacier ladder slot with Gilded Horizon (real +25% gold rain), preserving all node indices and the profile format. Glacier/endless remain outside this finite arc; no dead front unlock is sold.
+- `npm run sim -- --mode finale`: base/multi level 80 + one real rod-sized tier-eight strike banks **179.31B**, clears the final target without Forge bonuses, and survives the 1,000-degree Aegis ceiling. Eye + finale, 400 steps: **1,758ms total / 4.40ms mean** on this box. Unguarded shower burns in lava, with source 10B versus accounted **9,999,999,744** (relative Float32 rounding 0.00000256%).
+- Chromium: inspected Eye, golden shower and credits; actual rod-triggered bank **239B**, **13.90B** collected during ending, **7.91K** cores; clean console. Verified workshop return/re-entry and blow-up. The initial check banked an ineligible pot ordinarily, correctly leaving the storm active; adjusted QA timing to wait for the first scheduled bolt, then checked the winning path.
+- Gate: **497 tests / 36 files** passed, type-check and production build passed (12.22s; 574.25 kB / 181.13 kB gzip).

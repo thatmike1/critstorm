@@ -1,4 +1,5 @@
 import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
+import { finaleBursts } from "./finale";
 import { formatNumber } from "./format";
 import { createWorld, type World } from "./world";
 import { SimLayer, type SimAudioSink } from "./sim-layer";
@@ -390,6 +391,17 @@ export class CritEngine {
         const heft = Math.min(1, Math.log10(1 + payout) / 6);
         this.flashScreen(0xffd75e, 0.35 + heft * 0.35);
         this.shake(16 + heft * 12);
+    }
+
+    /** erupt the winning pot once as a conserved, screen-wide golden storm. */
+    eruptFinale(payout: number): void {
+        const { W, H } = this.world.sim;
+        for (const burst of finaleBursts(W, H, payout, this.bankRng)) {
+            this.launchEruption(burst.x, burst.y, burst.payout, 8, burst.delayMs);
+        }
+        this.spawn(payout, 8, true);
+        this.flashScreen(0xffe066, 0.8);
+        this.shake(28);
     }
 
     /** account for every exposed cell and queued payout when the player leaves a storm. */

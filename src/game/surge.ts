@@ -115,6 +115,8 @@ export type SurgeEndReason = "bank" | "bust";
 export interface PotState {
     /** running sum of strike contributions this surge, BEFORE the multiplier. */
     contributions: number;
+    /** highest actual crit tier captured, before any workshop tier floor. */
+    maxTier?: number;
     /** crits landed this surge; the exponent `n` of the multiplier. */
     crits: number;
     /** pot multiplier `M = 1.5^n`. */
@@ -186,9 +188,9 @@ export function potMultiplier(crits: number): number {
 }
 
 /** derive a full {@link PotState} snapshot from the raw contributions + crit count. */
-export function potState(contributions: number, crits: number): PotState {
+export function potState(contributions: number, crits: number, maxTier = 0): PotState {
     const multiplier = potMultiplier(crits);
-    return { contributions, crits, multiplier, value: contributions * multiplier };
+    return { contributions, crits, maxTier, multiplier, value: contributions * multiplier };
 }
 
 /**
@@ -202,6 +204,7 @@ export class Surge {
     private _heat = 0;
     private _contributions = 0;
     private _crits = 0;
+    private _maxTier = 0;
     private _coreTemp = 0;
     private readonly listeners: SurgeListeners;
     private readonly rng: SurgeRng;
@@ -249,7 +252,7 @@ export class Surge {
 
     /** a fresh snapshot of the live pot (all zero while idle). */
     get pot(): PotState {
-        return potState(this._contributions, this._crits);
+        return potState(this._contributions, this._crits, this._maxTier);
     }
 
     /** current core temperature (design §3); 0 while idle, climbs across a surge. */
@@ -315,9 +318,10 @@ export class Surge {
      *   call, but it WAS captured (and burned with the pot), so erupting it too would
      *   double-path exactly the strike that triggered the bust (critstorm-cjs).
      */
-    recordStrike(result: AttackResult, base: number): boolean {
+    recordStrike(result: AttackResult, base: number, actualTier = result.tier): boolean {
         if (this._phase !== "surging") return false;
         const isCrit = result.tier > 0;
+        this._maxTier = Math.max(this._maxTier, actualTier);
         this._contributions += isCrit ? result.damage : base;
         if (isCrit) this._crits += 1;
         this.listeners.onPotChange?.(this.pot);
@@ -393,6 +397,7 @@ export class Surge {
         this._heat = 0;
         this._contributions = 0;
         this._crits = 0;
+        this._maxTier = 0;
         this._coreTemp = 0;
     }
 }

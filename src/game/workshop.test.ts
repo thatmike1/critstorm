@@ -76,9 +76,8 @@ describe("workshop node tables (design §5)", () => {
             effect: { kind: "unlock-front", front: 3 },
         });
         expect(front.nodes[10]).toMatchObject({
-            name: "The Glacier",
-            desc: "unlock storm front 4",
-            effect: { kind: "unlock-front", front: 4 },
+            name: "Gilded Horizon",
+            effect: { kind: "event-modifier", modifier: { event: "gold-rain", severityMultiplier: 1.25 } },
         });
     });
 });
@@ -207,11 +206,11 @@ describe("workshop effect aggregation", () => {
         buyOut(state, "front");
         const fx = workshopEffects(state);
 
-        expect(fx.unlockedFronts).toBe(4);
+        expect(fx.unlockedFronts).toBe(3);
         expect(fx.surgeTierFloor).toBe(5);
-        expect(fx.eventModifiers).toHaveLength(8);
+        expect(fx.eventModifiers).toHaveLength(9);
         const goldRain = fx.eventModifiers.filter((m) => m.event === "gold-rain");
-        expect(goldRain.map((m) => m.severityMultiplier)).toEqual([1.25, 1.25, 1.5, 2]);
+        expect(goldRain.map((m) => m.severityMultiplier)).toEqual([1.25, 1.25, 1.5, 1.25, 2]);
     });
 });
 

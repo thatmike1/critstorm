@@ -87,6 +87,7 @@ import {
 } from "./game/workshop";
 import { loadWorkshopProfile, saveWorkshopProfile } from "./game/workshop-storage";
 import { ProfileStore } from "./game/persistence";
+import { FINALE_DURATION_SEC, FINAL_POT_THRESHOLD, qualifiesForFinale } from "./game/finale";
 import { coreProjection, stormGoal } from "./game/storm-goals";
 import { drainFixedSteps, SIM_STEP_SEC } from "./game/sim-layer";
 import { WorkshopView } from "./workshop-view";
@@ -197,6 +198,9 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     const spikeRng = useRef(createStormEventRng(seed ^ 0x5a1ce));
     const bestBankRef = useRef(0);
     const endingRef = useRef(false);
+    const outroRef = useRef<{ reason: StormEndReason; remaining: number } | null>(null);
+    const finalBankRef = useRef(0);
+    const [outro, setOutro] = useState<StormEndReason | null>(null);
     const routingRef = useRef<RoutingState | null>(null);
     const [routingHud, setRoutingHud] = useState({ count: 1, fee: collectorFeeWith(effects), cost: 120, shield: 0, worldGold: 0 });
     const [forecast, setForecast] = useState({ type: "weather gathering", seconds: 42, last: "" });
@@ -268,6 +272,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
         potValue: 0,
         multiplier: 1,
         crits: 0,
+        maxTier: 0,
         coreTemp: 0,
         criticalTemp: surgeRef.current.criticalTemp,
         // bumped every time the pot captures a strike, so the readout replays its
@@ -420,9 +425,18 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                 const fixed = drainFixedSteps(accumulator, Math.min(now - last, 250), SIM_STEP_SEC, 5);
                 accumulator = fixed.accumulatorSec;
                 last = now;
-                for (let step = 0; step < fixed.steps && !endingRef.current; step++) {
+                for (let step = 0; step < fixed.steps; step++) {
                     const dt = SIM_STEP_SEC;
                     const s = stateRef.current;
+                    const outroState = outroRef.current;
+                    if (outroState) {
+                        s.elapsed += dt;
+                        for (const collector of routing.collectors) creditEssence(s, applyPayoutModifier(e.storm.front, collector.collect(e.simulation)));
+                        outroState.remaining -= dt;
+                        if (outroState.remaining <= 0) finalizeStorm(outroState.reason);
+                        continue;
+                    }
+                    if (endingRef.current) break;
                     const surge = surgeRef.current;
                     s.elapsed += dt;
                     const shield = coolantHeadroom(e.storm);
@@ -510,6 +524,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                             potValue: pot.value,
                             multiplier: pot.multiplier,
                             crits: pot.crits,
+                            maxTier: pot.maxTier ?? 0,
                             coreTemp: surge.coreTemp,
                             criticalTemp: surge.criticalTemp,
                             captureSeq: captureSeqRef.current,
@@ -675,7 +690,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
      */
     const bankSurge = () => {
         const surge = surgeRef.current;
-        if (!surge.active) return;
+        if (!surge.active || endingRef.current) return;
         audioRef.current.unlock();
         const pot = surge.endSurge("bank");
         bestBankRef.current = Math.max(bestBankRef.current, pot.value);
@@ -684,7 +699,11 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
             // eruption seam as un-captured strikes, so the eruption-value nodes
             // fatten it too — surges are the dominant payout path.
             const payout = pot.value * effects.eruptionValueMultiplier;
-            engineRef.current?.eruptBank(payout);
+            if (engineRef.current && qualifiesForFinale(engineRef.current.storm.front.id, pot)) {
+                finalBankRef.current = pot.value;
+                engineRef.current.eruptFinale(payout);
+                endStormNow("victory");
+            } else engineRef.current?.eruptBank(payout);
             audioRef.current.bank(payout);
         }
     };
@@ -698,8 +717,19 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     const endStormNow = (reason: StormEndReason): void => {
         if (endingRef.current) return;
         endingRef.current = true;
+        if (reason === "victory") {
+            outroRef.current = { reason, remaining: FINALE_DURATION_SEC };
+            setOutro(reason);
+            audioRef.current.surgeDrone(0);
+        } else finalizeStorm(reason);
+    };
+
+    /** settle physical payouts and close the loss ledger after the ending spectacle. */
+    const finalizeStorm = (reason: StormEndReason): void => {
+        outroRef.current = null;
         const goldLeftBehind = engineRef.current?.abandonGold() ?? 0;
-        const final = { ...lifecycleRef.current.summarize(stateRef.current, reason), goldLeftBehind };
+        const final = { ...lifecycleRef.current.summarize(stateRef.current, reason), goldLeftBehind,
+            finalBank: finalBankRef.current || undefined, bestBank: bestBankRef.current, seed };
         setSummary((cur) => cur ?? final);
     };
 
@@ -817,6 +847,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                     "stage",
                     surging ? "frenzy" : "",
                     surgeHud.igniting ? "igniting" : "",
+                    outro ? "ending" : "",
                     selectedBrush || selectedStructure ? "painting" : "",
                 ]
                     .filter(Boolean)
@@ -826,10 +857,11 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                 onPointerUp={stopPainting}
                 onPointerLeave={stopPainting}
             >
+                {outro === "victory" && <div className="finale-banner"><strong>CRITSTORM</strong><span>THE SKY IS YOURS.</span><p>{formatNumber(finalBankRef.current)} · the final bank</p></div>}
                 <div className="stage-guide">
                     <span className="front-tag">{markers.front} · storm {Math.floor(stateRef.current.elapsed / 60)} min</span>
-                    <strong>{surging ? "ONE MORE COULD CHANGE EVERYTHING" : goal.title}</strong>
-                    <p>{surging ? "Gold waits in the core. Space releases it. The next crit heats it." : goal.detail}</p>
+                    <strong>{markers.front === "The Eye" ? "BANK THE FINAL CRITSTORM" : surging ? "ONE MORE COULD CHANGE EVERYTHING" : goal.title}</strong>
+                    <p>{markers.front === "The Eye" ? `One pot ≥ ${formatNumber(FINAL_POT_THRESHOLD)} with an actual tier 8 crit. Quench a route; lightning can feed your rod.` : surging ? "Gold waits in the core. Space releases it. The next crit heats it." : goal.detail}</p>
                 </div>
                 <div className="event-callout">{forecast.last ? `NOW: ${forecast.last}` : `${forecast.type} in ${forecast.seconds}s`}</div>
                 {toolCursor && (selectedBrush || selectedStructure) && <span className="tool-cursor"
@@ -850,6 +882,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                 <span>CRITSTORM</span>
             </div>
             <aside className="hud">
+                {markers.front === "The Eye" && <div className="final-target">FINAL BANK · 10B + TIER 8<br />{surgeHud.maxTier >= 8 ? "tier 8 captured · bank when the pot reaches 10B" : "catch lightning with a rod or roll the jackpot"}</div>}
                 <div className="title-row">
                     <h1>critstorm</h1>
                     <button className="mute" onClick={toggleMute}>
