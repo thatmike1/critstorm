@@ -20,6 +20,7 @@ import {
     valueToEssence,
     type EconomyState,
 } from "../src/game/economy";
+import { createGreedBell, ringBell, tickBell, bellReward } from "../src/game/greed-bell";
 import { Surge, SURGE_HEAT_THRESHOLD, type SurgeEndReason } from "../src/game/surge";
 import { mulberry32 } from "./rng";
 import type { BotStrategy, StormView, SurgeState } from "./bot-strategy";
@@ -41,10 +42,14 @@ export interface SurgeRunConfig {
     economy?: EconomyState;
     /** core critical temperature; defaults to the surge machine's own default. */
     criticalTemp?: number;
+    ambientCoeff?: number;
     /** per-frame timestep; defaults to {@link DEFAULT_STEP_SEC}. */
     stepSec?: number;
     /** hard frame cap so a never-banking run can never loop forever. */
     maxFrames?: number;
+    /** optional original wager, paired against ordinary banks. */
+    greedBell?: boolean;
+    strikesPerSec?: number;
 }
 
 /** the result of driving one surge to its exit (bank or bust). */
@@ -65,6 +70,8 @@ export interface SurgeOutcome {
      * survival-analysis index the bust-hazard curve is built from.
      */
     diedAtRide: number | null;
+    bellWon?: boolean;
+    bellHeat?: number;
 }
 
 /** build the read-only view a strategy decides from, out of the live surge. */
@@ -106,20 +113,26 @@ export function runSurge(cfg: SurgeRunConfig): SurgeOutcome {
     let lastHeatSource: "crit" | "ambient" = "ambient";
     let exit: { reason: SurgeEndReason; crits: number; value: number } | null = null;
 
+    const bell = createGreedBell();
+    let bellWon = false;
     const surge = new Surge(
         {
             onEnd: (reason, pot) => {
-                exit = { reason, crits: pot.crits, value: pot.value };
+                const reward = bellReward(bell, pot, reason);
+                bellWon = reward.won;
+                exit = { reason, crits: pot.crits, value: pot.value * reward.multiplier };
             },
         },
-        { rng: spikeRng, criticalTemp: cfg.criticalTemp }
+        { rng: spikeRng, criticalTemp: cfg.criticalTemp, ambientCoeff: cfg.ambientCoeff }
     );
 
     surge.addHeat(SURGE_HEAT_THRESHOLD); // ignite
 
-    const aps = attacksPerSec(economy);
+    const aps = cfg.strikesPerSec ?? attacksPerSec(economy);
     let attackTimer = 0;
     for (let frame = 0; frame < maxFrames && surge.active; frame++) {
+        if (cfg.greedBell && !bell.armed && surge.pot.crits >= 2) ringBell(surge, bell);
+        if (!surge.active) break;
         const action = cfg.strategy.decide(surgeView(economy, surge));
         if (action.type === "bank") {
             surge.endSurge("bank");
@@ -134,6 +147,7 @@ export function runSurge(cfg: SurgeRunConfig): SurgeOutcome {
         }
         if (surge.active) {
             lastHeatSource = "ambient";
+            tickBell(surge, bell, step);
             surge.tickHeat(step);
         }
     }
@@ -156,6 +170,7 @@ export function runSurge(cfg: SurgeRunConfig): SurgeOutcome {
         bankedValue: settled.reason === "bank" ? settled.value : 0,
         bankedEssence: settled.reason === "bank" ? valueToEssence(settled.value) : 0,
         diedAtRide,
+        ...(cfg.greedBell ? { bellWon, bellHeat: bell.heatAdded } : {}),
     };
 }
 

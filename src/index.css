@@ -1390,7 +1390,7 @@ button:disabled .upgrade-cost {
 .tool-cursor { position: absolute; z-index: 8; pointer-events: none; border: 2px dashed #9af0ff; padding: 8px; transform: translate(-50%, -50%); color: #9af0ff; font: 15px var(--font-num); background: #120204b0; }
 
 .finale-banner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 12; pointer-events: none; background: linear-gradient(transparent, #1c0f00aa); }
-.finale-banner strong { font-family: var(--font-title); font-size: clamp(24px, 5vw, 64px); color: #fff4b8; text-shadow: 4px 4px #7c3400, 0 0 30px #ffa800; }
+.finale-banner strong { font-family: var(--font-display); font-size: clamp(24px, 5vw, 64px); color: #fff4b8; text-shadow: 4px 4px #7c3400, 0 0 30px #ffa800; }
 .finale-banner span { margin-top: 24px; color: var(--gold); letter-spacing: 4px; }
 .finale-banner p { font-family: var(--font-num); font-size: 28px; }
 .stage.ending .stage-guide, .stage.ending .world-label, .stage.ending .tool-dock { opacity: 0; }
@@ -1454,3 +1454,42 @@ button:disabled .upgrade-cost {
   .stage.ending .mobile-bank { display: none; }
 }
 @media (max-width: 480px) { .tracks { grid-template-columns: 1fr; } }
+
+.greed-bell { margin: 8px 0; background: #1e1304; border: 2px solid #795719; padding: 8px; color: var(--gold); }
+.greed-bell button { width: 100%; border: 0; background: transparent; color: var(--gold); font: 12px var(--font-label); cursor: pointer; line-height: 1.4; }
+.greed-bell button:disabled { color: #8a6a2a; cursor: default; }
+.greed-bell span { display: block; font: 18px var(--font-num); line-height: 1.1; margin-top: 5px; }
+.greed-bell strong { font: 12px var(--font-label); line-height: 1.5; }
+.greed-bell.armed { border-color: var(--gold); box-shadow: inset 4px 0 var(--gold); padding-left: 12px; }
+.storm-journal { width: min(1100px, 100%); margin: 0 auto 24px; padding: 18px; border: 2px solid var(--gold-dim); background: #120204; }
+.journal-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; }
+.journal-head h2 { color: var(--gold); font: 16px var(--font-label); }
+.journal-head span, .storm-journal p { font: 21px var(--font-num); color: var(--ink-dim); }
+.storm-journal p { margin: 8px 0 16px; }
+.journal-records { display: flex; gap: 12px; overflow-x: auto; padding: 4px 0 10px; }
+.storm-record { flex: 0 0 260px; display: flex; flex-direction: column; gap: 8px; border: 1px solid #806120; padding: 14px; background: #251306; font: 19px var(--font-num); }
+.storm-record strong { color: var(--gold); font: 12px var(--font-label); line-height: 1.5; }
+.storm-record.blow-up { border-color: var(--red-deep); }
+.storm-record.victory { border: 2px solid var(--gold); }
+.record-take { font-size: 38px; color: var(--gold); }
+.record-take small { font: 9px var(--font-label); margin-left: 10px; }
+.share-storm, .replay-storm { padding: 9px; background: #120204; color: var(--gold); border: 1px solid #795719; cursor: pointer; font: 10px var(--font-label); line-height: 1.5; }
+.replay-storm { color: #120204; background: var(--gold); margin-top: auto; }
+.bell-stamp { color: #ffe9a2; }
+.journal-intro { margin: 0 auto 24px; padding: 16px; border: 1px solid #795719; width: min(1100px, 100%); color: var(--gold); font-size: 12px; }
+.journal-intro span { display: block; font: 22px var(--font-num); color: var(--ink-dim); margin-top: 8px; }
+.result-stamp { border: 1px solid var(--gold-deep); padding: 12px; width: 100%; text-align: center; color: var(--gold); font: 12px var(--font-label); line-height: 1.6; }
+.result-stamp span { display: block; font: 21px var(--font-num); }
+@media (max-width: 760px) { .storm-journal { padding: 12px; } .journal-head h2 { font-size: 13px; } .journal-intro { line-height: 1.5; } }
+
+/* the world always keeps the decisive action in view, including deep Eye HUDs. */
+.mobile-bank { display: flex; flex-direction: column; position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 14; min-width: 210px; }
+.mobile-bank button { padding: 10px 14px; color: #120204; background: var(--gold); border: 2px solid var(--gold-deep); box-shadow: 3px 3px #120204; font: 13px var(--font-label); cursor: pointer; }
+.mobile-bank span { background: #120204; color: var(--gold); padding: 3px 8px; text-align: center; font: 16px var(--font-num); }
+.mobile-bank .hot { color: var(--red); }
+.tool-dock span { max-width: 170px; font-size: 16px; }
+.stage.ending .mobile-bank { display: none; }
+@media (max-width: 760px) { .mobile-bank { left: 12px; right: 12px; transform: none; bottom: 10px; } }
+
+.results { align-items: flex-start; }
+.results-panel { margin: auto; }

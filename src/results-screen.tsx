@@ -1,3 +1,5 @@
+import { ShareStorm } from "./storm-journal-view";
+import { recordTitle, type StormRecord } from "./game/storm-journal";
 import { formatNumber } from "./game/format";
 import type { StormSummary } from "./game/storm-lifecycle";
 
@@ -26,6 +28,9 @@ export interface ResultsScreenProps {
 export function ResultsScreen({ summary, onNextStorm }: ResultsScreenProps) {
     const banked = summary.reason !== "blow-up";
     const won = summary.reason === "victory";
+    const record: StormRecord = { id: "result", seed: summary.seed ?? 0, front: summary.front ?? "flats", reason: summary.reason,
+        cores: summary.cores, collected: summary.bankedEssence, bestBank: summary.bestBank ?? 0,
+        duration: summary.durationSec, bellsWon: summary.bellsWon ?? 0 };
     const flooredCores = summary.rawCores === 0 && summary.cores > 0;
     return (
         <div className="results">
@@ -51,6 +56,7 @@ export function ResultsScreen({ summary, onNextStorm }: ResultsScreenProps) {
                               : `${formatNumber(summary.rawCores)} × 1 — no bank-out bonus`}
                     </span>
                 </div>
+                <div className="result-stamp">{recordTitle(record)}<span>BEST BANK · {formatNumber(record.bestBank)}{record.bellsWon ? ` · ${record.bellsWon} BELL WIN${record.bellsWon > 1 ? "S" : ""}` : ""}</span></div>
                 <div className="results-grid">
                     <div className="results-row">
                         <span className="results-key">essence collected</span>
@@ -78,6 +84,7 @@ export function ResultsScreen({ summary, onNextStorm }: ResultsScreenProps) {
                     <p>Thanks, Mike, for wanting more.<br />Built with React & PixiJS · fonts from Google Fonts</p>
                     <span>Thanks for riding the storm.</span>
                 </div>}
+                <ShareStorm record={record} />
                 <button className="next-storm-btn" onClick={onNextStorm}>
                     {won ? "BACK TO THE WORKSHOP" : "NEXT STORM"}
                 </button>

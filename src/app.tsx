@@ -88,6 +88,8 @@ import {
 import { loadWorkshopProfile, saveWorkshopProfile } from "./game/workshop-storage";
 import { ProfileStore } from "./game/persistence";
 import { FINALE_DURATION_SEC, FINAL_POT_THRESHOLD, qualifiesForFinale } from "./game/finale";
+import { createGreedBell, ringBell, tickBell, bellReward, type GreedBell } from "./game/greed-bell";
+import { loadJournal, rememberStorm, saveJournal, type StormRecord } from "./game/storm-journal";
 import { loadPreferences, savePreferences } from "./game/preferences";
 import { coreProjection, stormGoal } from "./game/storm-goals";
 import { drainFixedSteps, SIM_STEP_SEC } from "./game/sim-layer";
@@ -189,9 +191,10 @@ interface StormViewProps {
     effects: WorkshopEffects;
     /** fired when the player banks out of the storm, with its core accounting. */
     onStormEnd(accounting: StormEndAccounting): void;
+    onStormSettled(summary: StormSummary): void;
 }
 
-function StormView({ effects, onStormEnd, seed }: StormViewProps) {
+function StormView({ effects, onStormEnd, onStormSettled, seed }: StormViewProps) {
     const [initialState] = useState(() => createInitialState(effects));
     const hostRef = useRef<HTMLDivElement>(null);
     const [preferences, setPreferences] = useState(loadPreferences);
@@ -201,6 +204,9 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     const aimRng = useRef(createStormEventRng(seed ^ 0xa17));
     const spikeRng = useRef(createStormEventRng(seed ^ 0x5a1ce));
     const bestBankRef = useRef(0);
+    const bellRef = useRef<GreedBell>(createGreedBell());
+    const bellsWonRef = useRef(0);
+    const [bellHud, setBellHud] = useState(createGreedBell);
     const endingRef = useRef(false);
     const outroRef = useRef<{ reason: StormEndReason; remaining: number } | null>(null);
     const finalBankRef = useRef(0);
@@ -231,6 +237,9 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                 onEnd: (reason, pot) => {
                     settleAutoStrikerOverclock(autoStrikerRef.current, reason, pot);
                     if (reason !== "bust") return;
+                    bellRef.current = createGreedBell();
+                    setBellHud(createGreedBell());
+                    engineRef.current?.renderBell(false, false);
                     engineRef.current?.bust(pot);
                     audioRef.current.bust();
                     // INTERIM blow-up condition (npq.2): an overheat bust while the world
@@ -321,6 +330,8 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
      */
     const strikeCallbacks = {
         onSurgeStart: () => {
+            bellRef.current = createGreedBell();
+            setBellHud(createGreedBell());
             markFirstSurge(stateRef.current);
             lifecycleRef.current.recordSurgeStart();
             audioRef.current.frenzy();
@@ -465,6 +476,8 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                         );
                     });
                     if (endingRef.current) break;
+                    tickBell(surge, bellRef.current, dt);
+                    if (endingRef.current) break;
                     // the front's reward knob applies at the mint (design §4.5): the bog's
                     // payoutMult scales essence as gold converts, mirroring the riskMult the
                     // event scheduler already consumes. post-sim, so the in-world value
@@ -543,6 +556,8 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                             igniting: surge.active && now < igniteUntilRef.current,
                         });
                         setHud(snapshot(s, autoStrikerRef.current));
+                        setBellHud({ ...bellRef.current });
+                        e.renderBell(bellRef.current.armed, pot.crits >= bellRef.current.targetCrits);
                         setGoal(stormGoal(s, autoStrikerRef.current.level, bestBankRef.current));
                         setProjection(coreProjection(s));
                         setRoutingHud({ count: routing.collectors.length, fee: routing.collectors[0].fee,
@@ -693,6 +708,15 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
         runStrike(target);
     };
 
+    /** ring a voluntary wager; its immediate and ongoing heat enter the real core. */
+    const takeBellWager = (): void => {
+        if (endingRef.current || !ringBell(surgeRef.current, bellRef.current)) return;
+        audioRef.current.unlock();
+        if (surgeRef.current.active) audioRef.current.golden();
+        engineRef.current?.renderBell(surgeRef.current.active, false);
+        setBellHud({ ...bellRef.current });
+    };
+
     /**
      * BANK the surge (design §3): end the surge via the exit seam with reason
      * `bank` and erupt the whole pot at once as a single gold mega-mountain at the
@@ -705,12 +729,17 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
         if (!surge.active || endingRef.current) return;
         audioRef.current.unlock();
         const pot = surge.endSurge("bank");
-        bestBankRef.current = Math.max(bestBankRef.current, pot.value);
+        const reward = bellReward(bellRef.current, pot, "bank");
+        if (reward.won) bellsWonRef.current += 1;
+        bestBankRef.current = Math.max(bestBankRef.current, pot.value * reward.multiplier);
+        bellRef.current = createGreedBell(); setBellHud(createGreedBell());
+        engineRef.current?.renderBell(false, false);
         if (pot.value > 0) {
             // forge wiring (design §5): the banked pot leaves through the same
             // eruption seam as un-captured strikes, so the eruption-value nodes
             // fatten it too — surges are the dominant payout path.
-            const payout = pot.value * effects.eruptionValueMultiplier;
+            const payout = pot.value * effects.eruptionValueMultiplier * reward.multiplier;
+            if (reward.won) engineRef.current?.celebrateBell();
             if (engineRef.current && qualifiesForFinale(engineRef.current.storm.front.id, pot)) {
                 finalBankRef.current = pot.value;
                 engineRef.current.eruptFinale(payout);
@@ -740,7 +769,9 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
         outroRef.current = null;
         const goldLeftBehind = engineRef.current?.abandonGold() ?? 0;
         const final = { ...lifecycleRef.current.summarize(stateRef.current, reason), goldLeftBehind,
-            finalBank: finalBankRef.current || undefined, bestBank: bestBankRef.current, seed };
+            finalBank: finalBankRef.current || undefined, bestBank: bestBankRef.current, seed,
+            front: engineRef.current?.storm.front.id ?? "flats", bellsWon: bellsWonRef.current };
+        onStormSettled(final);
         setSummary((cur) => cur ?? final);
     };
 
@@ -877,7 +908,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                     <span>{outro === "bank-out" ? `${formatNumber(projection.cores)} cores · the house pays ×1.5` : "the gold you collected is still yours"}</span>
                 </div>}
                 <div className="mobile-bank" onPointerDown={(event) => event.stopPropagation()}>
-                    <button onClick={surging ? bankSurge : bankOutStorm}>{surging ? `BANK ${formatNumber(surgeHud.potValue)}` : `BANK OUT · ${formatNumber(projection.cores)} cores`}</button>
+                    <button onClick={surging ? bankSurge : bankOutStorm}>{surging ? `BANK ${formatNumber(surgeHud.potValue * (bellHud.armed && surgeHud.crits >= bellHud.targetCrits ? 2 : 1))}` : `BANK OUT · ${formatNumber(projection.cores)} cores`}</button>
                     {surging && <span className={headroom.medianFits ? "" : "hot"}>heat {Math.round(headroom.load * 100)}% · {headroom.medianFits ? `~${headroom.medianCritsLeft} crits left` : "one crit could bust"}</span>}
                 </div>
                 {outro === "victory" && <div className="finale-banner"><strong>CRITSTORM</strong><span>THE SKY IS YOURS.</span><p>{formatNumber(finalBankRef.current)} · the final bank</p></div>}
@@ -1010,9 +1041,16 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                         </div>
                         <button className="bank-btn wide" onClick={bankSurge}>
                             <span className="bank-word">BANK</span>
-                            <span className="bank-take">{formatNumber(surgeHud.potValue)}</span>
+                            <span className="bank-take">{formatNumber(surgeHud.potValue * (bellHud.armed && surgeHud.crits >= bellHud.targetCrits ? 2 : 1))}</span>
                             <em>space</em>
                         </button>
+                        <div className={`greed-bell${bellHud.armed ? " armed" : ""}`}>
+                            {bellHud.armed ? <><strong>{surgeHud.crits >= bellHud.targetCrits ? "BELL PAID · BANK DOUBLE GOLD" : `THE BELL WANTS ${Math.max(0, bellHud.targetCrits - surgeHud.crits)} MORE CRITS`}</strong>
+                                <span>+6 heat/sec until bank · bank early to forfeit the bonus</span></> :
+                                <button onClick={takeBellWager} disabled={surgeHud.crits < 2}>
+                                    RING THE GREED BELL<span>{surgeHud.crits < 2 ? "available after two crits" : "two more crits → double physical gold"}<br />+95 heat now · +6/sec until bank</span>
+                                </button>}
+                        </div>
                     </div>
                 ) : (
                     <>
@@ -1179,9 +1217,13 @@ export function App() {
     const [lastStorm, setLastStorm] = useState<StormEndAccounting | null>(null);
     const [stormSeq, setStormSeq] = useState(0);
     const [stormSeed, setStormSeed] = useState(0);
+    const [records, setRecords] = useState(loadJournal);
+    const recordsRef = useRef(records);
+    const settledRunsRef = useRef(new Set<number>());
+    const replaySeedRef = useRef<number | null>(null);
     // front selection is session-only: a reload starts at Flats, while a return
     // from Results keeps the choice in this App state.
-    const [selectedFront, setSelectedFrontId] = useState<FrontId>(() => debugFront ?? "flats");
+    const [selectedFront, setSelectedFrontId] = useState<FrontId>(() => debugFront ?? resolveFrontSelection(new URLSearchParams(window.location.search).get("sky"), workshopEffects(initialWorkshop).unlockedFronts).id);
 
     /** buy the next node on a track, persisting on success. */
     const buyTrackNode = (track: WorkshopTrackId): void => {
@@ -1193,28 +1235,45 @@ export function App() {
         });
     };
 
-    /** credit a finished storm's cores and return to the workshop. */
-    const handleStormEnd = (accounting: StormEndAccounting): void => {
+    /** save earned cores and a keepsake at settlement, including if results are later reloaded. */
+    const handleStormSettled = (accounting: StormSummary): void => {
+        if (settledRunsRef.current.has(stormSeq)) return;
+        settledRunsRef.current.add(stormSeq);
         setWorkshop((prev) => {
             const next: WorkshopState = { cores: prev.cores, purchased: { ...prev.purchased } };
             creditCores(next, accounting.cores);
             saveWorkshopProfile(profileStore, next);
             return next;
         });
+        const record: StormRecord = { id: `${Date.now()}:${stormSeq}:${accounting.seed ?? 0}`, seed: accounting.seed ?? 0,
+            front: accounting.front ?? "flats", reason: accounting.reason, cores: accounting.cores,
+            collected: accounting.bankedEssence, bestBank: accounting.bestBank ?? 0,
+            duration: accounting.durationSec, bellsWon: accounting.bellsWon ?? 0 };
+        const nextRecords = rememberStorm(recordsRef.current, record);
+        recordsRef.current = nextRecords; saveJournal(nextRecords); setRecords(nextRecords);
         setLastStorm(accounting);
-        setMode("workshop");
+    };
+
+    /** leave settled results without awarding the same storm a second time. */
+    const handleStormEnd = (): void => { setMode("workshop"); };
+
+    /** choose the same terrain/weather seed with the player's current workshop. */
+    const replayStorm = (record: StormRecord): void => {
+        replaySeedRef.current = record.seed; setSelectedFrontId(record.front);
+        enterStorm(record.front);
     };
 
     /** start the next storm run with the current workshop effects. */
-    const enterStorm = (): void => {
+    const enterStorm = (requestedFront?: FrontId): void => {
         const unlockedFronts = workshopEffects(workshop).unlockedFronts;
         const resolvedFront =
-            debugFront ?? resolveFrontSelection(selectedFront, unlockedFronts).id;
+            debugFront ?? resolveFrontSelection(requestedFront ?? selectedFront, unlockedFronts).id;
         setSelectedFront(resolvedFront);
         setSelectedFrontId(resolvedFront);
         const requestedSeed = new URLSearchParams(window.location.search).get("seed");
-        setStormSeed(requestedSeed !== null && Number.isFinite(Number(requestedSeed))
-            ? Number(requestedSeed) >>> 0 : (Date.now() + stormSeq * 0x9e3779b9) >>> 0);
+        setStormSeed(replaySeedRef.current ?? (requestedSeed !== null && Number.isFinite(Number(requestedSeed))
+            ? Number(requestedSeed) >>> 0 : (Date.now() + stormSeq * 0x9e3779b9) >>> 0));
+        replaySeedRef.current = null;
         setStormSeq((n) => n + 1);
         setMode("storm");
     };
@@ -1227,11 +1286,13 @@ export function App() {
                 onBuyNode={buyTrackNode}
                 selectedFront={selectedFront}
                 onSelectFront={setSelectedFrontId}
-                onEnterStorm={enterStorm}
+                onEnterStorm={() => enterStorm()}
+                records={records}
+                onReplay={replayStorm}
             />
         );
     }
     return (
-        <StormView key={stormSeq} seed={stormSeed} effects={workshopEffects(workshop)} onStormEnd={handleStormEnd} />
+        <StormView key={stormSeq} seed={stormSeed} effects={workshopEffects(workshop)} onStormEnd={handleStormEnd} onStormSettled={handleStormSettled} />
     );
 }

@@ -1,3 +1,5 @@
+import { StormJournal } from "./storm-journal-view";
+import type { StormRecord } from "./game/storm-journal";
 import { formatNumber } from "./game/format";
 import {
     availableFronts,
@@ -30,6 +32,8 @@ export interface WorkshopViewProps {
     onSelectFront(front: FrontId): void;
     /** leave the workshop and start the next storm. */
     onEnterStorm(): void;
+    records: readonly StormRecord[];
+    onReplay(record: StormRecord): void;
 }
 
 /** the implemented front choices shown by the between-storm picker. */
@@ -131,6 +135,8 @@ export function WorkshopView({
     selectedFront,
     onSelectFront,
     onEnterStorm,
+    records,
+    onReplay,
 }: WorkshopViewProps) {
     const frontOptions = frontPickerOptions(
         workshopEffects(workshop).unlockedFronts,
@@ -206,6 +212,7 @@ export function WorkshopView({
                     ))}
                 </div>
             </section>
+            <StormJournal records={records} onReplay={onReplay} />
             <div className="tracks">
                 {WORKSHOP_TRACKS.map((track) => (
                     <TrackColumn

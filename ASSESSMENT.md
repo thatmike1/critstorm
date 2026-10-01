@@ -44,3 +44,9 @@ A shareable clip needs a readable setup and reversal: a visibly swollen pot; “
 Finish the finite three-front game. Keep the existing 8–35 minute economic arc rather than replacing it with an unmeasured idle shortcut. The 5–7 hour completion target is a design aspiration, not something a short headless bot can honestly certify; measure threshold feasibility and name that limitation. No endless prestige, Glacier flooding, asset downloads, extra dependency trees or worktrees. INGOT stays deferred pending a dedicated value/melt design because bounded cell mass already solves its immediate performance motivation.
 
 Own flair should amplify greed and physical wealth, not mint safe passive money: one optional, visible risk challenge and one memory of the storms the player survived. Detail and rationale land in the final unit.
+
+## Completion audit
+
+The six units in PROGRESS.md now resolve the prioritized opening, routing, defense, workshop/front, finale, timing/RNG and presentation gaps above. The final original mechanics are the Greed Bell's paid heat wager and bounded replayable storm keepsakes. All 503 tests, type-check and build pass; physical routing/finale benches, paired Bell cohorts and fresh/finale browser play are recorded in the checkpoint.
+
+The original assessment remains an account of the starting prototype. INGOT, Glacier and endless prestige remain intentionally outside this finite version. The design's 5–7 hour human arc and existing balance holdout deficits still need measurement, not an invented certification: follow-up bead `critstorm-thv` asks for three fresh human sessions before further cost tuning.

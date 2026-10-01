@@ -6,6 +6,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     test: {
         environment: "node",
+        // seeded balance cohorts are CPU-bound; keep the shared ARM box quiet.
+        maxWorkers: 1,
+        testTimeout: 60_000,
         include: ["src/**/*.test.ts", "sim/**/*.test.ts", "scripts/**/*-test.ts"],
     },
 });

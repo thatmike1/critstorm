@@ -1,5 +1,13 @@
 # CRITSTORM finish checkpoint
 
+**Finished and verified on `feat/finish`.** The finite game now runs from a guided first storm through paid gold routes, mortal coolant and defenses, a working workshop/front ladder, and the Eye's golden finale. Banks and ruptures have visible impact, synthesized sound, calm-motion controls and phone layouts. The original Greed Bell adds a voluntary wager; a saved storm journal gives each ending a keepsake and a replayable sky.
+
+**Try it:** `npm ci`, `npm run dev`, enter the Flats, follow the goals, buy Auto-Striker and build a route. Space banks a surge; the visible world button banks out between surges. Ring the Bell after two crits if you want its heat wager. Spend cores between storms to reach the Bog and Eye; bank a pre-Forge/pre-Bell 10B pot containing a real tier-eight strike in the Eye to win. `?seed=42` gives a repeatable sky; the README lists focused harness commands and QA shortcuts.
+
+**Verification:** final gate **503 tests / 38 files**, TypeScript and production build green. Every unit was inspected in cached Chromium; final checks covered five fresh minutes, a Bell win, result/reload persistence, mobile layouts, the golden finale and replay. Sim measurements and their limits are below. Browser/server stopped and temporary captures removed. All units are committed and pushed to `origin/feat/finish`; main was never pushed.
+
+**Next:** human playtest bead `critstorm-thv` tracks three fresh sessions through the complete arc. Short bots establish mechanics and threshold feasibility, not the design's 5–7 hour human completion target. Existing overclock holdout and terrain-variance balance issues remain separate follow-ups; no claim that those are solved.
+
 Branch: `feat/finish`. Main must never be pushed. User workflow is sequential units, one dependency tree, one test worker, gated commits and a push after every unit. Read ASSESSMENT.md for the audit and scope decisions. Beads epic: `critstorm-hio`.
 
 ## Numbered unit plan (ordered by pull to keep playing)
@@ -9,7 +17,7 @@ Branch: `feat/finish`. Main must never be pushed. User workflow is sequential un
 2. **Build your own gold machine — complete.** Ice/Wall unlocks, additional collectors and fee upgrades; real Vault drains and Front event modifiers; tool feedback and event forecast. Account for blocked payouts. Measure collection and hazard exposure with the harness; inspect painted tools and installed routing in Chromium.
 3. **Chase the Eye and finish the game — complete.** Third arena with lava/lightning, honest v1 workshop ladder, visible final bank requirement, conserved golden finale, terminal stats/credits and replay. Measure feasible finale banks and Eye performance; browser-check ordinary, failed and winning exits.
 4. **Make greed feel enormous — complete.** Camera impact, presentation hit-stop, crit tier typography, bounded sparks/trails, synthesized bank-out/rupture feedback, delayed blow-up so the disaster stays visible, motion/audio control. Capture bank, bust, results and narrow-screen layouts.
-5. **Own flair: a storm worth remembering — planned (last unit).** Add one or two original ideas that deepen voluntary risk and personal storm history; state the rationale here. Measure rewards/costs if balance changes; verify persistence and complete a final end-to-end run. Write the final summary at the top, gate, commit, push and clean up browser/server/scratch artifacts.
+5. **Own flair: a storm worth remembering — complete (last unit).** The Greed Bell and saved storm journal add a voluntary risk decision and personal keepsakes. Paired balance measurements, persistence/replay checks, fresh five-minute play and the finale are verified. Final summary, cleanup and gated branch push complete the run.
 
 ## Unit 0 evidence
 
@@ -23,7 +31,7 @@ Branch: `feat/finish`. Main must never be pushed. User workflow is sequential un
 
 ## Next action
 
-Units 0–2 are complete. Next is the last unit (`critstorm-hio.6`): the Greed Bell and remembered storms, then final end-to-end verification and cleanup.
+No implementation units remain. Next session picks up the human playtest (`critstorm-thv`), then uses observed bottlenecks to prioritize existing balance follow-ups.
 
 ## Unit 1 — a reason for the next click
 
@@ -67,3 +75,29 @@ Units 0–2 are complete. Next is the last unit (`critstorm-hio.6`): the Greed B
 - This unit changes presentation rather than balance. Its physical-impact-hold regression and the existing seeded economic distributions check that visual pauses do not grant safety or alter payouts.
 - Initial full gate had one **5s timeout** in a 3,000-trial surge computation while Chromium shared the CPU; other 497 tests passed. Stopped the browser/server and reran with one worker and a 60s computational timeout, retaining every balance assertion.
 - Final gate: **498 tests / 36 files** passed (76.42s), type-check and production build passed (579.07 kB / 182.54 kB gzip).
+
+## Unit 5 — own flair: a storm worth remembering
+
+- **The Greed Bell:** after two crits, accept +95 immediate heat and +6 heat/sec until bank; ride two additional crits to bank double physical gold. The toll continues after completing the target. Early bank forfeits the bonus; rupture earns none. It uses the actual core and payout ledger, not a second hidden failure roll or direct essence award. The original pot still has to qualify for the finale before Bell/Forge bonuses.
+- **Storm keepsakes:** the newest eight endings carry a real best bank, collected essence, cores, seed/front, duration and Bell wins. Titles celebrate leaving ahead, a fortune in ashes, the Bellringer or owning the sky. Replay uses the same seed/front with the player's current workshop; share links respect unlocks. Journal storage is bounded, versioned and separate from the compatible v1 workshop profile. Cores and the record now persist at settlement, once per storm, before leaving results.
+- I picked these because the hook is a decision to risk a physical fortune. The Bell makes that decision explicit and clip-readable while remaining optional; keepsakes give a failed storm a story and invite a different decision in the same sky. Neither adds safe passive income or a new grind currency.
+- Added an always-visible bank action inside the world on desktop as well as phone, so the new wager cannot crowd out the exit. Long finale receipts scroll from an accessible title. The test configuration defaults to one worker with a 60s computational timeout for seeded cohorts on this shared ARM box; assertions and seeds are unchanged.
+
+`npm run sim -- --mode greed`, 256 paired seeds at 2.5 strikes/sec, fresh economy. Returns are mean essence after the normal collection fee, assuming the banked payout is collected; the model does not simulate terrain losses.
+
+| Ceiling | Bank at | Ordinary mean / busts | Bell mean / busts | Bell wins |
+| --- | --- | --- | --- | --- |
+| 620 | 4 crits | 305.63 / 0% | 476.03 / 14.1% | 220/256 |
+| 620 | 5 crits | 576.41 / 0% | 315.95 / 62.1% | 97/256 |
+| 620 | 6 crits | 1,015.40 / 2.7% | 18.31 / 98.4% | 4/256 |
+| 1,000 | 4 crits | 305.63 / 0% | 611.27 / 0% | 256/256 |
+| 1,000 | 5 crits | 576.41 / 0% | 1,120.60 / 1.2% | 253/256 |
+| 1,000 | 6 crits | 1,058.94 / 0% | 1,757.33 / 10.2% | 230/256 |
+
+- The Bell helps a shallow exit at a real cost, then punishes overholding at the starter ceiling; purchased protection opens deeper wagers. Added mean heat was 195.8→238.8 degrees for the starter 4→6-crit cases. Ordinary strategies retain their existing seeded pins.
+- Extended the routing bench with full Aegis plus intact paid coolant: among bank-at-1→14, EV peaks at **11 crits / 7,845.73 essence**, ceiling 1,380, ambient coefficient 0.0621. Unmodified/intact-coolant peaks stay at **6 / 642.24** and **8 / 2,100.97**. This supports the intended roughly ten-crit defended ride; live Ice still melts and the static comparison grants no free protection.
+- New regressions cover Bell eligibility/one wager, dt-scaled heat and rupture, forfeiture, physical extra-gold conservation/collection, bounded journal persistence, duplicate endings and corrupt/unavailable storage.
+- Chromium Bell run (seed 42, isolated late workshop fixture): ring at two, complete four, bank **3.24K**; **3.25K** collected overall, **3 cores**, one Bellringer receipt. Workshop wallet went 100→103 at settlement, stayed 103 on leaving results and on reload, with exactly one record. Replay entered the saved Flats sky; checked mobile journal and blow-up receipts, clean page errors.
+- Final fresh profile used normal purchases and 2.5 manual strikes/sec: at five minutes **132K collected**, **10.41K best bank**, **24 cores**, **24 actual surges**, zero reported hazard loss, **1.09K exposed gold abandoned** at bank-out. Bought Auto-Striker at 3.5s and base/chance/multiplier levels 20/20/12 over the run. Buying Forge's first node cost 15 cores and the next storm started with two permanent damage levels. This is an active, deliberately banking session, not a claimed average player.
+- Final Eye replay with the journal: actual rod-triggered **239B** eligible bank, **13.90B** collected, **7.91K** cores; Owner of the Sky receipt, workshop return, re-entry and dramatic blow-up all worked. Inspected final fresh, Bell, workshop/mobile and finale screenshots; no page errors. Removed temporary screenshots/scripts/logs and stopped all browsers and the owned dev server.
+- Final gate: **503 tests / 38 files** passed (**67.65s**), TypeScript and production build passed (**11.98s**, **585.74 kB / 184.80 kB gzip** entry). The existing Vite large-chunk advisory remains; no additional dependency tree or downloaded browser was needed. Finished beads are closed and mirrored; human full-arc measurement is filed as `critstorm-thv`.

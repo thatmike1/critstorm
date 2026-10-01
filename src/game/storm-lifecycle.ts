@@ -1,3 +1,4 @@
+import type { FrontId } from "./fronts";
 import type { Simulation } from "../sim/simulation";
 import { createState, type EconomyState } from "./economy";
 import { endStorm, type StormEndAccounting, type StormEndReason } from "./storm-end";
@@ -50,6 +51,8 @@ export interface StormSummary extends StormEndAccounting {
     finalBank?: number;
     bestBank?: number;
     seed?: number;
+    front?: FrontId;
+    bellsWon?: number;
     /** gold value lost to hazards this storm (acid, lava, erase, busted pots). */
     goldLost: number;
     /** surges ignited this storm. */

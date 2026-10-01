@@ -126,6 +126,7 @@ export class CritEngine {
     private extraDrainMarkers: DrainMarker[] = [];
     private autoStriker: AutoStrikerRenderer;
     private coreGlow: Graphics;
+    private bellMarker = new Graphics();
     private glowPulse = 0;
     private glowPot: PotState | null = null;
     private flash: Graphics;
@@ -179,6 +180,8 @@ export class CritEngine {
         this.coreGlow = new Graphics();
         this.coreGlow.visible = false;
         app.stage.addChild(this.coreGlow);
+        app.stage.addChild(this.bellMarker);
+        this.bellMarker.visible = false;
 
         this.stage = new Container();
         app.stage.addChild(this.stage);
@@ -659,6 +662,28 @@ export class CritEngine {
     setReducedMotion(reduced: boolean): void {
         this.reducedMotion = reduced;
         if (reduced) { this.shakeTime = 0; this.impactHoldMs = 0; this.app.stage.position.set(0, 0); this.flashAlpha = 0; this.flash.visible = false; }
+    }
+
+    /** show an actual wager as a pixel bell beside the furnace. */
+    renderBell(armed: boolean, ready: boolean): void {
+        this.bellMarker.visible = armed;
+        if (!armed) return;
+        const unit = Math.max(2, this.app.screen.width / this.world.sim.W);
+        this.bellMarker.clear();
+        this.bellMarker.rect(-unit, -unit * 4, unit * 2, unit).fill(0xffe066);
+        this.bellMarker.rect(-unit * 2, -unit * 3, unit * 4, unit * 3).fill(ready ? 0xfff6c0 : 0xdb8422);
+        this.bellMarker.rect(-unit * 3, 0, unit * 6, unit).fill(0xffe066);
+        this.bellMarker.rect(-unit * 0.5, unit, unit, unit).fill(0xffe066);
+        this.bellMarker.position.set(this.app.screen.width * (this.world.core.x + 14) / this.world.sim.W,
+            this.app.screen.height * (this.world.core.y - 8) / this.world.sim.H);
+    }
+
+    /** mark an earned bell win without replacing the physical bank payload. */
+    celebrateBell(): void {
+        this.sparkBurst(this.app.screen.width * 0.5, this.app.screen.height * 0.5, 100, 0xfff6c0);
+        this.spawnText("THE BELL PAYS DOUBLE", { x: this.app.screen.width * 0.5, y: this.app.screen.height * 0.62,
+            fontSize: Math.min(24, this.app.screen.width / 22), fill: GOLDEN_COLOR, strokeWidth: 2,
+            tier: 0, baseScale: 1, vx: 0, vy: -12, maxLife: 1600, spin: 0, rotation: 0 });
     }
 
     /** celebrate collected wealth at departure; the sparks carry no economic value. */

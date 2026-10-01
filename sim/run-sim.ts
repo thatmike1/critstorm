@@ -12,9 +12,10 @@
  *   npm run sim 20                       # legacy: economy table, 20 minutes
  *
  * flags: --duration <minutes> --strategy <never-ride|always-ride|bank-at-n>
- *        --seed <int> --mode <storm|pacing|late-pacing|economy>
+ *        --seed <int> --mode <storm|pacing|late-pacing|economy|routing|finale|greed>
  *        --auto-striker <enabled|disabled> --overclock <enabled|disabled>
  */
+import { runGreedBalance } from "./greed-bench";
 import { runFinaleBalance } from "./finale-bench";
 import { runRoutingBalance } from "./routing-bench";
 import { buy, createState, critChance, critMulti, expectedDps, tick } from "../src/game/economy";
@@ -30,7 +31,7 @@ import {
 } from "./storm-bot";
 
 interface CliArgs {
-    mode: "storm" | "pacing" | "late-pacing" | "economy" | "routing" | "finale";
+    mode: "storm" | "pacing" | "late-pacing" | "economy" | "routing" | "finale" | "greed";
     durationMin: number;
     strategy: string;
     seed: number;
@@ -63,10 +64,10 @@ function parseArgs(argv: string[]): CliArgs {
                     value !== "storm" &&
                     value !== "pacing" &&
                     value !== "late-pacing" &&
-                    value !== "economy" && value !== "routing" && value !== "finale"
+                    value !== "economy" && value !== "routing" && value !== "finale" && value !== "greed"
                 ) {
                     throw new Error(
-                        `--mode must be storm|pacing|late-pacing|economy, got ${value}`
+                        `--mode must be storm|pacing|late-pacing|economy|routing|finale|greed, got ${value}`
                     );
                 }
                 args.mode = value;
@@ -230,6 +231,7 @@ function printStorm(summary: StormSummary): void {
 
 function main(): void {
     const args = parseArgs(process.argv.slice(2));
+    if (args.mode === "greed") { runGreedBalance(); return; }
     if (args.mode === "finale") { runFinaleBalance(); return; }
     if (args.mode === "routing") { runRoutingBalance(); return; }
     if (args.mode === "economy") {

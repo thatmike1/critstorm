@@ -29,9 +29,17 @@ core provide temporary heat headroom; melting or boiling removes it. Additional 
 new routes, and polishing reduces their skim. Collected essence—not your unspent balance—earns
 cores. Gold left on the field at departure stays behind.
 
+After two surge crits, the **Greed Bell** offers a wager: take +95 heat immediately and +6 heat/sec
+until banking, survive two more crits, then bank double physical gold. Banking early forfeits the
+bonus. The extra gold still has to reach a collector. The workshop remembers your last eight
+storms; ride a saved sky again with your current upgrades, or copy its seed link. Earned cores and
+the receipt save when results settle, so reloading the results cannot lose or award them twice.
+
 For reproducible checks use `?seed=42`; `?front=eye` and `?lv=base,chance,multi,auto,golden` are QA
-shortcuts. `npm run sim -- --mode routing` measures paid routes/coolant;
-`npm run sim -- --mode finale` checks the winning bank and Eye physics budget.
+shortcuts. Shared `?seed=42&sky=eye` links respect the recipient's front unlocks.
+`npm run sim -- --mode routing` measures paid routes/coolant;
+`npm run sim -- --mode finale` checks the winning bank and Eye physics budget;
+`npm run sim -- --mode greed` compares ordinary banks against the Bell across paired seeds.
 
 **Core invariant:** value is conserved. It moves with cells (Lagrangian carry, via swap paths —
 never `setCell`), and every source and sink is accounted for in the ledger.
@@ -42,7 +50,7 @@ never `setCell`), and every source and sink is accounted for in the ledger.
 npm ci
 npm run dev       # vite dev server
 npm run build     # tsc --noEmit && vite build
-npm test          # vitest run
+npm test          # vitest run, one worker by default
 npm run sim       # headless sim harness — balance/playtest measurement
 ```
 
