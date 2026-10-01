@@ -229,7 +229,8 @@ export class Simulation {
     readonly buf32: Uint32Array<ArrayBuffer>;
     readonly glow32: Uint32Array<ArrayBuffer>;
 
-    constructor(W: number, H: number) {
+    /** allocate the headless grid with an optional isolated random stream. */
+    constructor(W: number, H: number, private readonly rng: SimulationRng = () => Math.random()) {
         this.W = W;
         this.H = H;
         const n = W * H;
@@ -240,7 +241,7 @@ export class Simulation {
         this.heat = new Float32Array(n).fill(AMBIENT);
         this.heatNext = new Float32Array(n);
         this.value = new Float32Array(n);
-        for (let i = 0; i < n; i++) this.extra[i] = (Math.random() * 256) | 0;
+        for (let i = 0; i < n; i++) this.extra[i] = (this.rng() * 256) | 0;
 
         this.chunkW = Math.ceil(W / CS);
         this.chunkH = Math.ceil(H / CS);
@@ -273,7 +274,7 @@ export class Simulation {
     }
 
     private assignSpawnLife(i: number, mat: number): void {
-        const random = this.strikeRng ?? Math.random;
+        const random = this.strikeRng ?? this.rng;
         if (mat === Mat.FIRE) this.life[i] = 90 + ((random() * 50) | 0);
         else if (mat === Mat.SMOKE) this.life[i] = 90 + ((random() * 100) | 0);
         else if (mat === Mat.STEAM) this.life[i] = Math.min(255, 130 + ((random() * 120) | 0));
@@ -300,7 +301,7 @@ export class Simulation {
         const i = y * this.W + x;
         if (!goldPhaseCarry(this.cells[i], mat)) this.value[i] = 0;
         this.cells[i] = mat;
-        this.extra[i] = ((this.strikeRng ?? Math.random)() * 256) | 0;
+        this.extra[i] = ((this.strikeRng ?? this.rng)() * 256) | 0;
         this.assignSpawnLife(i, mat);
         this.assignSpawnHeat(i, mat);
         this.stamp[i] = this.frame;
@@ -604,7 +605,7 @@ export class Simulation {
             if (this.zap(x, y)) return; // hit ground / solid / edge
             if (y >= this.H - 1) return; // reached the floor
             const pull = this.conductorPull(x, y);
-            const random = this.strikeRng ?? Math.random;
+            const random = this.strikeRng ?? this.rng;
             const jitter = random() < 0.34 ? -1 : random() < 0.5 ? 1 : 0;
             let dx = jitter + pull;
             dx = dx < -1 ? -1 : dx > 1 ? 1 : dx;
@@ -626,7 +627,7 @@ export class Simulation {
      * entry point. The bolt and all its branches are traced synchronously; the
      * resulting LIGHTNING cells then flash and fade over the next few frames.
      */
-    strike(sx: number, sy: number, rng: SimulationRng = Math.random): LightningStrikeResult {
+    strike(sx: number, sy: number, rng: SimulationRng = this.rng): LightningStrikeResult {
         if (sx < 0 || sy < 0 || sx >= this.W || sy >= this.H) return { changedCells: [] };
         this.strikeRng = rng;
         this.strikeChangedCells = [];
@@ -749,7 +750,7 @@ export class Simulation {
         // payload, so reset value or a stale ledger would survive a load.
         this.value.fill(0);
         for (let i = 0; i < n; i++) {
-            this.extra[i] = (Math.random() * 256) | 0;
+            this.extra[i] = (this.rng() * 256) | 0;
             // fire/smoke/steam need a lifespan or they'd die on the first frame.
             this.assignSpawnLife(i, this.cells[i]);
             // re-seed source temperatures so fire/lava/ice load at the right heat.
@@ -898,7 +899,7 @@ export class Simulation {
             case Mat.SAND:
                 // sustained lava heat fuses sand into glass; probabilistic so a pool
                 // forms a glass crust gradually rather than flashing the whole bed.
-                if (this.heat[i] >= meltPoint[Mat.SAND] && Math.random() < 0.05) {
+                if (this.heat[i] >= meltPoint[Mat.SAND] && this.rng() < 0.05) {
                     this.setCell(x, y, Mat.GLASS);
                     return;
                 }
@@ -924,7 +925,7 @@ export class Simulation {
                 this.updateWater(x, y, i, m);
                 return;
             case Mat.OIL:
-                if (this.heat[i] >= ignitionPoint[Mat.OIL] && Math.random() < 0.3) {
+                if (this.heat[i] >= ignitionPoint[Mat.OIL] && this.rng() < 0.3) {
                     this.reportPhaseChange(x, y, "ignite", m);
                     this.setCell(x, y, Mat.FIRE);
                     return;
@@ -950,13 +951,13 @@ export class Simulation {
                 this.updateSteam(x, y, i);
                 return;
             case Mat.WOOD:
-                if (this.heat[i] >= ignitionPoint[Mat.WOOD] && Math.random() < 0.1) {
+                if (this.heat[i] >= ignitionPoint[Mat.WOOD] && this.rng() < 0.1) {
                     this.reportPhaseChange(x, y, "ignite", m);
                     this.setCell(x, y, Mat.FIRE);
                 }
                 return;
             case Mat.PLANT:
-                if (this.heat[i] >= ignitionPoint[Mat.PLANT] && Math.random() < 0.12) {
+                if (this.heat[i] >= ignitionPoint[Mat.PLANT] && this.rng() < 0.12) {
                     this.reportPhaseChange(x, y, "ignite", m);
                     this.setCell(x, y, Mat.FIRE);
                     return;
@@ -1015,14 +1016,14 @@ export class Simulation {
 
     private updatePowder(x: number, y: number, m: number): void {
         if (this.tryMove(x, y, x, y + 1, m)) return;
-        const first = Math.random() < 0.5 ? -1 : 1;
+        const first = this.rng() < 0.5 ? -1 : 1;
         if (this.tryMove(x, y, x + first, y + 1, m)) return;
         if (this.tryMove(x, y, x - first, y + 1, m)) return;
     }
 
     private updateLiquid(x: number, y: number, m: number): void {
         if (this.tryMove(x, y, x, y + 1, m)) return;
-        const first = Math.random() < 0.5 ? -1 : 1;
+        const first = this.rng() < 0.5 ? -1 : 1;
         if (this.tryMove(x, y, x + first, y + 1, m)) return;
         if (this.tryMove(x, y, x - first, y + 1, m)) return;
         // Horizontal spread to seek its own level.
@@ -1038,7 +1039,7 @@ export class Simulation {
         this.life[i]--;
         this.wake(x, y); // stay awake while alive (so it keeps fading even if stuck)
         const m = this.cells[i];
-        const first = Math.random() < 0.5 ? -1 : 1;
+        const first = this.rng() < 0.5 ? -1 : 1;
         if (this.tryRise(x, y, x, y - 1, m)) return;
         if (this.tryRise(x, y, x + first, y - 1, m)) return;
         if (this.tryRise(x, y, x - first, y - 1, m)) return;
@@ -1054,7 +1055,7 @@ export class Simulation {
      * neighbors — it reacts only to its own cell temperature.
      */
     private updateWater(x: number, y: number, i: number, m: number): void {
-        if (this.heat[i] >= boilPoint[Mat.WATER] && Math.random() < 0.4) {
+        if (this.heat[i] >= boilPoint[Mat.WATER] && this.rng() < 0.4) {
             this.reportPhaseChange(x, y, "boil", m);
             this.setCell(x, y, Mat.STEAM); // boil -> steam (carries the hot temp up)
             return;
@@ -1082,7 +1083,7 @@ export class Simulation {
      * instead, so only a little water drizzles back and the loop never sustains.
      */
     private updateSteam(x: number, y: number, i: number): void {
-        if (this.heat[i] <= freezePoint[Mat.STEAM] && Math.random() < 0.02) {
+        if (this.heat[i] <= freezePoint[Mat.STEAM] && this.rng() < 0.02) {
             this.setCell(x, y, Mat.WATER); // condense — occasional water-cycle close
             return;
         }
@@ -1092,10 +1093,10 @@ export class Simulation {
     private updateFire(x: number, y: number, i: number): void {
         if (this.life[i] <= 0) {
             // Burn out into a puff of smoke most of the time.
-            this.setCell(x, y, Math.random() < 0.6 ? Mat.SMOKE : Mat.EMPTY);
+            this.setCell(x, y, this.rng() < 0.6 ? Mat.SMOKE : Mat.EMPTY);
             return;
         }
-        this.life[i] -= 1 + ((Math.random() * 2) | 0);
+        this.life[i] -= 1 + ((this.rng() * 2) | 0);
 
         // Wet-count snuff. A flame OVERWHELMED by wet matter (>=2 water/steam
         // 4-neighbors) is drowning: skip re-emission so its heat craters and puff
@@ -1108,7 +1109,7 @@ export class Simulation {
         if (coolN >= 2) {
             // a tiny survival chance keeps a drowning edge flickering for a frame
             // rather than blinking out flatly; mostly it converts straight to smoke.
-            if (Math.random() < 0.92) {
+            if (this.rng() < 0.92) {
                 this.setCell(x, y, Mat.SMOKE);
                 return;
             }
@@ -1122,7 +1123,7 @@ export class Simulation {
         // pinned body's flat edges (coolN === 1) would survive and boil forever,
         // only the corners (coolN >= 2) dying. Boiling is near-instant at 1200°, so a
         // genuine boil-from-below flame still pushes enough heat up before it dies.
-        if (coolN === 1 && Math.random() < 0.7) {
+        if (coolN === 1 && this.rng() < 0.7) {
             this.setCell(x, y, Mat.SMOKE);
             return;
         }
@@ -1138,8 +1139,8 @@ export class Simulation {
         // steam and rising into the vacated cell, because it stays coolant-adjacent
         // the whole way. So a submerged body can't escape to the surface — it stays
         // put and erodes via the snuff. In dry air it rises freely as before.
-        if (coolN === 0 && Math.random() < 0.5) {
-            const first = Math.random() < 0.5 ? -1 : 1;
+        if (coolN === 0 && this.rng() < 0.5) {
+            const first = this.rng() < 0.5 ? -1 : 1;
             if (this.tryRise(x, y, x, y - 1, Mat.FIRE)) return;
             if (this.tryRise(x, y, x + first, y - 1, Mat.FIRE)) return;
         }
@@ -1154,7 +1155,7 @@ export class Simulation {
         // compare BEFORE subtracting: life is a Uint8Array, so decrementing past 0
         // wraps to ~255 and the bolt cell would flash forever (and never let its
         // chunk sleep). its short lifespan lands on that boundary almost every time.
-        const dec = 1 + ((Math.random() * 2) | 0);
+        const dec = 1 + ((this.rng() * 2) | 0);
         if (this.life[i] <= dec) {
             this.setCell(x, y, Mat.EMPTY);
             return;
@@ -1250,12 +1251,12 @@ export class Simulation {
         if (this.heat[i] - AMBIENT <= AMBIENT_BAND) this.wake(x, y);
 
         // Viscous: only sometimes flow, and only sluggishly sideways.
-        if (Math.random() < 0.6) {
+        if (this.rng() < 0.6) {
             if (this.moveLava(x, y, x, y + 1)) return;
-            const first = Math.random() < 0.5 ? -1 : 1;
+            const first = this.rng() < 0.5 ? -1 : 1;
             if (this.moveLava(x, y, x + first, y + 1)) return;
             if (this.moveLava(x, y, x - first, y + 1)) return;
-            if (Math.random() < 0.3) {
+            if (this.rng() < 0.3) {
                 if (this.moveLava(x, y, x + first, y)) return;
                 if (this.moveLava(x, y, x - first, y)) return;
             }
@@ -1293,11 +1294,11 @@ export class Simulation {
                 ny = y + dy;
             if (nx < 0 || ny < 0 || nx >= this.W || ny >= this.H) continue;
             const target = this.cells[ny * this.W + nx];
-            if (isDissolvable(target) && Math.random() < 0.25) {
+            if (isDissolvable(target) && this.rng() < 0.25) {
                 // only GOLD carries value; the tell fires before setCell zeroes it.
                 if (target === Mat.GOLD) this.reportGoldLoss(nx, ny, "acid");
                 this.setCell(nx, ny, Mat.EMPTY);
-                if (Math.random() < 0.4) {
+                if (this.rng() < 0.4) {
                     this.setCell(x, y, Mat.SMOKE);
                     return;
                 } // acid spent
@@ -1308,7 +1309,7 @@ export class Simulation {
     }
 
     private growPlant(x: number, y: number): void {
-        if (Math.random() > 0.012) return;
+        if (this.rng() > 0.012) return;
         const dirs = [
             [0, -1],
             [0, 1],
@@ -1335,7 +1336,7 @@ export class Simulation {
         // melt probability is high so ice surrounded by fire reliably thaws within
         // the short window the new (cooling) heat field leaves before the flame
         // rises away — the lingering heat that used to guarantee it is gone.
-        if (this.heat[i] >= meltPoint[Mat.ICE] && Math.random() < 0.5) {
+        if (this.heat[i] >= meltPoint[Mat.ICE] && this.rng() < 0.5) {
             this.setCell(x, y, Mat.WATER);
             return;
         }
@@ -1380,7 +1381,7 @@ export class Simulation {
                     ny = y + dy;
                 if (nx < 0 || ny < 0 || nx >= this.W || ny >= this.H) continue;
                 if (this.cells[ny * this.W + nx] === Mat.WALL) continue; // walls survive
-                this.setCell(nx, ny, Math.random() < 0.7 ? Mat.FIRE : Mat.EMPTY);
+                this.setCell(nx, ny, this.rng() < 0.7 ? Mat.FIRE : Mat.EMPTY);
             }
         }
     }

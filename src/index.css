@@ -1360,3 +1360,23 @@ button:disabled .upgrade-cost {
 
   .stage.frenzy::after { opacity: 1; }
 }
+
+/* the first storm explains itself in the world, then follows actual progress. */
+.stage-guide { position: absolute; top: 108px; left: 8%; right: 8%; z-index: 4; text-align: center; pointer-events: none; }
+.stage-guide strong { display: block; font-size: 13px; color: var(--gold); margin: 8px 0; }
+.stage-guide p { max-width: 480px; margin: auto; font-family: var(--font-num); font-size: 21px; line-height: 1.1; color: var(--ink); }
+.front-tag { font-size: 9px; color: var(--ink-faint); }
+.world-label { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: none; z-index: 4; white-space: nowrap; font-size: 9px; padding: 4px 6px; background: var(--black); }
+.core-label { color: var(--gold-dim); }
+.drain-label { color: #9af0ff; }
+.storm-goal { padding: 8px; background: var(--black); border-left: 3px solid var(--gold); }
+.storm-goal strong { display: block; color: var(--gold); font-size: 9px; }
+.storm-goal > span { font: 17px var(--font-num); }
+.goal-track { height: 4px; margin: 7px 0; background: var(--brass); }
+.goal-track span { display: block; height: 100%; background: var(--gold); }
+.workshop-intro { padding: 14px; border: 2px solid var(--gold-dim); background: var(--black); max-width: 840px; }
+.workshop-intro strong { color: var(--gold); font-size: 13px; }
+.workshop-intro p { font: 23px/1.2 var(--font-num); margin: 10px 0; }
+.workshop-intro > span { font-size: 10px; color: var(--ink-dim); }
+.stage { touch-action: none; }
+.quick-machine .brush { width: 100%; }

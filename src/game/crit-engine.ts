@@ -9,6 +9,7 @@ import type { PotState } from "./surge";
 import { tellsForLoad } from "./surge-tells";
 import { DrainMarker } from "./drain-marker";
 import type { CollectorRegion } from "./collector";
+import { createStormEventRng } from "./storm-events";
 import { AutoStrikerRenderer } from "./auto-striker";
 
 /** color ramp by crit tier: dim old-gold trickle -> gold -> fire -> neon jackpot */
@@ -127,18 +128,20 @@ export class CritEngine {
     private active: FloatingCrit[] = [];
     private bonuses: FallingBonus[] = [];
     private eruptions: Eruption[] = [];
+    private bankRng: () => number;
     private shakeTime = 0;
     private shakeStrength = 0;
 
-    private constructor(app: Application) {
+    private constructor(app: Application, seed: number, private readonly rng = createStormEventRng(seed ^ 0xeffec7)) {
         this.app = app;
+        this.bankRng = createStormEventRng(seed ^ 0xba7c);
 
         // BOTTOM LAYER: the bootstrapped storm world (terrain floor + storm core),
         // added first so every crit number, effect, and flash draws on top of it
         // (design §7). It lives on app.stage (not this.stage) so screen shake never
         // jitters the world underneath. the core + strike zone are held on `world`
         // for the eruption spawner (wave 3).
-        this.world = createWorld();
+        this.world = createWorld({ seed });
         this.simLayer = new SimLayer(this.world.sim);
         this.simLayer.resize(app.screen.width, app.screen.height);
         app.stage.addChild(this.simLayer.sprite);
@@ -207,7 +210,7 @@ export class CritEngine {
      * onto a dead sim.
      */
     attachAudio(audio: SimAudioSink): void {
-        this.simLayer.attachAudio(audio);
+        this.simLayer.attachAudio(audio, this.rng);
     }
 
     /**
@@ -237,11 +240,11 @@ export class CritEngine {
         this.autoStriker.fire();
     }
 
-    static async create(host: HTMLElement): Promise<CritEngine> {
+    static async create(host: HTMLElement, seed = 0): Promise<CritEngine> {
         const app = new Application();
         await app.init({ background: "#080605", resizeTo: host, antialias: true });
         host.appendChild(app.canvas);
-        return new CritEngine(app);
+        return new CritEngine(app, seed);
     }
 
     spawn(damage: number, tier: number, golden = false): void {
@@ -252,8 +255,8 @@ export class CritEngine {
         const label = golden ? `✦ ${formatNumber(damage)} ✦` : formatNumber(damage);
         const fill = golden ? GOLDEN_COLOR : TIER_COLORS[Math.min(tier, TIER_COLORS.length - 1)];
         const strokeWidth = golden ? 4 : tier >= 2 ? Math.min(tier, 4) : 0;
-        const x = w * 0.1 + Math.random() * w * 0.8;
-        const y = h * 0.55 + Math.random() * h * 0.35;
+        const x = w * 0.1 + this.rng() * w * 0.8;
+        const y = h * 0.55 + this.rng() * h * 0.35;
         this.spawnText(label, {
             x,
             y,
@@ -262,11 +265,11 @@ export class CritEngine {
             strokeWidth,
             tier,
             baseScale: tier >= 2 || golden ? 0.2 : 1,
-            vx: (Math.random() - 0.5) * (20 + tier * 15),
-            vy: -(60 + tier * 40 + Math.random() * 40) * (golden ? 0.5 : 1),
+            vx: (this.rng() - 0.5) * (20 + tier * 15),
+            vy: -(60 + tier * 40 + this.rng() * 40) * (golden ? 0.5 : 1),
             maxLife: (900 + tier * 350) * (golden ? 1.6 : 1),
-            spin: golden ? (Math.random() - 0.5) * 0.8 : 0,
-            rotation: (Math.random() - 0.5) * 0.15 * tier,
+            spin: golden ? (this.rng() - 0.5) * 0.8 : 0,
+            rotation: (this.rng() - 0.5) * 0.15 * tier,
         });
         if (tier >= 4) this.shake(Math.min(2 + (tier - 4) * 3, 14));
         if (tier >= 6 || golden)
@@ -361,8 +364,8 @@ export class CritEngine {
         // rain each share as a delayed ballistic burst, scattered in a disc around the
         // core (sqrt keeps the scatter area-uniform) so the mountain builds broadly.
         shares.forEach((share, i) => {
-            const angle = (i / bursts) * Math.PI * 2 + Math.random() * 0.8;
-            const r = Math.sqrt(Math.random()) * BANK_SCATTER_CELLS;
+            const angle = (i / bursts) * Math.PI * 2 + this.bankRng() * 0.8;
+            const r = Math.sqrt(this.bankRng()) * BANK_SCATTER_CELLS;
             const gx = clampInt(Math.round(this.world.core.x + Math.cos(angle) * r), 0, W - 1);
             const gy = clampInt(Math.round(this.world.core.y + Math.sin(angle) * r), 0, H - 1);
             const delay = (i / bursts) * BANK_VOLLEY_MS;
@@ -389,7 +392,8 @@ export class CritEngine {
     renderSurge(pot: PotState | null): void {
         this.glowPot = pot;
         if (!pot) {
-            this.coreGlow.visible = false;
+            this.coreGlow.visible = true;
+            this.drawRestingCore();
             return;
         }
         this.coreGlow.visible = true;
@@ -418,6 +422,19 @@ export class CritEngine {
                 tell.heatTarget
             );
         }
+    }
+
+    /** draw a pixel furnace at rest so the first strike has a visible source. */
+    private drawRestingCore(): void {
+        const x = this.world.core.x / this.world.sim.W * this.app.screen.width;
+        const y = this.world.core.y / this.world.sim.H * this.app.screen.height;
+        this.coreGlow.clear();
+        this.coreGlow.rect(-22, -18, 44, 36).fill(0x4d3812);
+        this.coreGlow.rect(-17, -23, 34, 46).fill(0xb3861f);
+        this.coreGlow.rect(-14, -14, 28, 28).fill(0x120204);
+        this.coreGlow.rect(-7, -7, 14, 14).fill(0xffb02e);
+        this.coreGlow.rect(-3, -5, 6, 8).fill(0xfff3c8);
+        this.coreGlow.position.set(x, y);
     }
 
     /** redraw the core-glow disc for `pot` at the current breathing pulse. */
@@ -472,13 +489,13 @@ export class CritEngine {
             }),
         });
         token.anchor.set(0.5);
-        token.position.set(w * 0.15 + Math.random() * w * 0.7, -40);
+        token.position.set(w * 0.15 + this.rng() * w * 0.7, -40);
         token.eventMode = "static";
         token.cursor = "pointer";
         const bonus: FallingBonus = {
             text: token,
-            vy: 55 + Math.random() * 25,
-            swayPhase: Math.random() * Math.PI * 2,
+            vy: 55 + this.rng() * 25,
+            swayPhase: this.rng() * Math.PI * 2,
             elapsed: 0,
         };
         token.on("pointerdown", () => {
@@ -504,17 +521,17 @@ export class CritEngine {
         const h = this.app.screen.height;
         for (let i = 0; i < 10; i++) {
             this.spawnText("+", {
-                x: w - 30 - Math.random() * 60,
-                y: h * 0.2 + Math.random() * h * 0.5,
-                fontSize: 16 + Math.random() * 14,
+                x: w - 30 - this.rng() * 60,
+                y: h * 0.2 + this.rng() * h * 0.5,
+                fontSize: 16 + this.rng() * 14,
                 fill: GOLDEN_COLOR,
                 strokeWidth: 0,
                 tier: 0,
                 baseScale: 1,
-                vx: -(40 + Math.random() * 120),
-                vy: -(30 + Math.random() * 90),
-                maxLife: 600 + Math.random() * 300,
-                spin: (Math.random() - 0.5) * 2,
+                vx: -(40 + this.rng() * 120),
+                vy: -(30 + this.rng() * 90),
+                maxLife: 600 + this.rng() * 300,
+                spin: (this.rng() - 0.5) * 2,
                 rotation: 0,
             });
         }
@@ -629,6 +646,9 @@ export class CritEngine {
         if (this.glowPot) {
             this.glowPulse += dt * 6;
             this.drawCoreGlow(this.glowPot);
+        } else {
+            this.coreGlow.visible = true;
+            this.drawRestingCore();
         }
         for (let i = this.active.length - 1; i >= 0; i--) {
             const c = this.active[i];
@@ -669,7 +689,7 @@ export class CritEngine {
         if (this.shakeTime > 0) {
             this.shakeTime -= dtMs;
             const s = this.shakeStrength * (this.shakeTime / 250);
-            this.stage.position.set((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+            this.stage.position.set((this.rng() - 0.5) * s, (this.rng() - 0.5) * s);
             if (this.shakeTime <= 0) {
                 this.shakeStrength = 0;
                 this.stage.position.set(0, 0);

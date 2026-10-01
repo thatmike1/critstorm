@@ -1,3 +1,4 @@
+import { createStormEventRng } from "./storm-events";
 /** clamp to [lo,hi]; NaN-safe enough for the mapping helpers below. */
 function clamp(v: number, lo: number, hi: number): number {
     return v < lo ? lo : v > hi ? hi : v;
@@ -209,6 +210,9 @@ export function lightningCrackSchedule(rng: () => number, count = 3): CrackleSpa
 
 /** tiny webaudio synth for feedback blips — zero assets, everything is oscillators */
 export class AudioEngine {
+    /** seed synthesized noise separately from gameplay. */
+    constructor(private readonly rng: () => number = createStormEventRng(0xa0d10)) {}
+
     private ctx: AudioContext | null = null;
     muted = false;
     private noise: AudioBuffer | null = null;
@@ -314,7 +318,7 @@ export class AudioEngine {
         if (this.noise) return this.noise;
         const buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
         const data = buf.getChannelData(0);
-        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        for (let i = 0; i < data.length; i++) data[i] = this.rng() * 2 - 1;
         this.noise = buf;
         return buf;
     }
@@ -394,7 +398,7 @@ export class AudioEngine {
      * WIRING: `Simulation.setPhaseChangeListener`, kind `ignite` (the per-material
      * heat gates), bridged by `attachSimAudio` in `src/game/sim-layer.ts`.
      */
-    ignite(rng: () => number = Math.random): void {
+    ignite(rng: () => number = this.rng): void {
         if (this.muted || !this.ctx) return;
         const gate = stepThrottle(this.igniteThrottle, this.ctx.currentTime, PHASE_LIMITS);
         this.igniteThrottle = gate.state;
@@ -498,7 +502,7 @@ export class AudioEngine {
      * strike callback at ~line 306 where `attack(result.tier)` fires, gated on
      * `result.tier === MAX_TIER`.
      */
-    lightning(rng: () => number = Math.random): void {
+    lightning(rng: () => number = this.rng): void {
         if (this.muted || !this.ctx) return;
         const { state, play } = stepThrottle(
             this.lightningThrottle,

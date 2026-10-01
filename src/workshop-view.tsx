@@ -142,6 +142,16 @@ export function WorkshopView({
                 <h1>the workshop</h1>
                 <span className="workshop-sub">between storms · spend storm cores</span>
             </header>
+            <div className="workshop-intro">
+                <strong>MAKE A FORTUNE. MAKE IT HOME.</strong>
+                <p>Strike molten gold into the world. Route it to a collector. Ride a surge for a bigger pot;
+                    bank before the core detonates. Collected essence buys tools now and permanent cores when you leave.</p>
+                <span>Flats → Bog → Eye. Build a machine that can bank the final CRITSTORM.</span>
+            </div>
+            <button className="enter-storm" onClick={onEnterStorm}>
+                <span className="enter-word">ENTER THE STORM</span>
+                <span className="enter-hint">your workshop upgrades ride with you</span>
+            </button>
             {lastStorm && (
                 <div className="storm-yield">
                     <span className="yield-reason">
@@ -183,6 +193,9 @@ export function WorkshopView({
                         >
                             <span className="front-option-name">{option.front.name}</span>
                             <span className="front-option-detail">
+                                {option.front.id === "flats" ? "Open ground · learn to route gold" : "Oil & plants · ×1.25 yield · faster hazards"}
+                            </span>
+                            <span className="front-option-detail">
                                 {option.locked
                                     ? "locked · buy the Front node"
                                     : option.selected
@@ -203,10 +216,7 @@ export function WorkshopView({
                     />
                 ))}
             </div>
-            <button className="enter-storm" onClick={onEnterStorm}>
-                <span className="enter-word">ENTER THE STORM</span>
-                <span className="enter-hint">your workshop upgrades ride with you</span>
-            </button>
+
         </div>
     );
 }

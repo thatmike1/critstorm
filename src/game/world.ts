@@ -162,7 +162,7 @@ export function createWorld(opts: WorldOptions = {}): World {
     const rand = mulberry32(seed);
     const surface = buildHeightMap(width, baseline, variation, rand);
 
-    const sim = new Simulation(width, height);
+    const sim = new Simulation(width, height, mulberry32(seed ^ 0x9e3779b9));
     paintFloor(sim, surface, sandCap);
 
     // front terrain hooks run on their own rngs derived from the seed, so the

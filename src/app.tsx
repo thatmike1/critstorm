@@ -87,6 +87,8 @@ import {
 } from "./game/workshop";
 import { loadWorkshopProfile, saveWorkshopProfile } from "./game/workshop-storage";
 import { ProfileStore } from "./game/persistence";
+import { coreProjection, stormGoal } from "./game/storm-goals";
+import { drainFixedSteps, SIM_STEP_SEC } from "./game/sim-layer";
 import { WorkshopView } from "./workshop-view";
 
 // the persistent meta profile (design §7): storm cores + workshop nodes only,
@@ -180,19 +182,27 @@ function createInitialState(effects: WorkshopEffects): InitialGameState {
 
 /** props for one storm run; a fresh mount consumes a fresh workshop-effects snapshot. */
 interface StormViewProps {
+    seed: number;
     /** the aggregate workshop effects this storm opens with (design §5). */
     effects: WorkshopEffects;
     /** fired when the player banks out of the storm, with its core accounting. */
     onStormEnd(accounting: StormEndAccounting): void;
 }
 
-function StormView({ effects, onStormEnd }: StormViewProps) {
+function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     const [initialState] = useState(() => createInitialState(effects));
     const hostRef = useRef<HTMLDivElement>(null);
+    const rollRng = useRef(createStormEventRng(seed ^ 0xc017));
+    const aimRng = useRef(createStormEventRng(seed ^ 0xa17));
+    const spikeRng = useRef(createStormEventRng(seed ^ 0x5a1ce));
+    const bestBankRef = useRef(0);
+    const [goal, setGoal] = useState(() => stormGoal(initialState.economy, 0, 0));
+    const [projection, setProjection] = useState(() => coreProjection(initialState.economy));
+    const [markers, setMarkers] = useState({ coreY: 38, drainY: 70, front: "The Flats" });
     const stateRef = useRef<EconomyState>(initialState.economy);
     const autoStrikerRef = useRef<AutoStrikerState>(initialState.autoStriker);
     const engineRef = useRef<CritEngine | null>(null);
-    const audioRef = useRef<AudioEngine>(new AudioEngine());
+    const audioRef = useRef<AudioEngine>(new AudioEngine(createStormEventRng(seed ^ 0xa0d10)));
     const clickTimesRef = useRef<number[]>([]);
     /**
      * build a fresh surge machine for one storm. the overheat bust (design §3,
@@ -222,6 +232,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             // aegis wiring (design §5): the workshop raises the core's critical temp
             // and dampens the ambient ramp, so deep rides become survivable.
             {
+                rng: spikeRng.current,
                 criticalTemp: criticalTempWith(effects),
                 ambientCoeff: ambientCoeffWith(effects),
                 tierFloor: effects.surgeTierFloor,
@@ -320,7 +331,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         executeStrike(
             stateRef.current,
             surgeRef.current,
-            Math.random,
+            rollRng.current,
             strikeCallbacks,
             target,
             heat,
@@ -338,7 +349,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         executeResolvedStrike(
             economy,
             surgeRef.current,
-            Math.random,
+            rollRng.current,
             strikeCallbacks,
             { damage: baseDamage(economy) * Math.pow(critMulti(economy), MAX_TIER), tier: MAX_TIER, golden: false },
             { x: rod.x, y: rod.y },
@@ -355,9 +366,10 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         let raf = 0;
         let last = performance.now();
         let hudTimer = 0;
+        let accumulator = 0;
         let cancelled = false;
 
-        CritEngine.create(hostRef.current!).then((e) => {
+        CritEngine.create(hostRef.current!, seed).then((e) => {
             if (cancelled) {
                 e.destroy();
                 return;
@@ -384,7 +396,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             // storm events replace the old falling-777 bonus with deterministic
             // in-world pressure (design §4.4). its rng is isolated from combat rolls
             // so the same storm duration always schedules the same world events.
-            stormEventsRef.current = new StormEvents(e.storm, createStormEventRng(0x5700_7001));
+            stormEventsRef.current = new StormEvents(e.storm, createStormEventRng(seed ^ 0x5700_7001));
             // the drain: solid gold settling in this band becomes essence at
             // (1 - fee). essence now flows ONLY through here (applyAttack no longer
             // credits it), so an attack pays out only once its gold reaches home.
@@ -397,97 +409,105 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
             // show the drain on screen (design pillar 4): the marker grate marks the
             // catchment so gold reaching it reads as banked, not silently vanished.
             e.setDrainRegion(collector.region);
+            setMarkers({ coreY: e.storm.core.y / e.simulation.H * 100,
+                drainY: collector.region.y / e.simulation.H * 100, front: e.storm.front.name });
             const frame = (now: number) => {
-                const dt = Math.min((now - last) / 1000, 0.1);
+                const fixed = drainFixedSteps(accumulator, Math.min(now - last, 250), SIM_STEP_SEC, 5);
+                accumulator = fixed.accumulatorSec;
                 last = now;
-                const s = stateRef.current;
-                const surge = surgeRef.current;
-                s.elapsed += dt;
-                tickAutoStriker(autoStrikerRef.current, dt, () => {
-                    engine!.pulseAutoStriker();
-                    // aim + heat are game-code decisions: an area-uniform strike-zone
-                    // point (seedable rng seam) and the cadence-scaled heat fill.
-                    runStrike(
-                        autoStrikerAim(engine!.storm.strikeZone, Math.random),
-                        autoStrikerStrikeHeat(autoStrikerRef.current),
-                        "automatic",
-                        autoStrikerSurgeHeat(autoStrikerRef.current)
-                    );
-                });
-                // the front's reward knob applies at the mint (design §4.5): the bog's
-                // payoutMult scales essence as gold converts, mirroring the riskMult the
-                // event scheduler already consumes. post-sim, so the in-world value
-                // ledger stays conserved.
-                const drained = applyPayoutModifier(e.storm.front, collector.collect(e.simulation));
-                creditEssence(s, drained);
-                // pulse the drain grate the frame it converts gold, so essence income
-                // visibly originates FROM the drain rather than appearing on the HUD.
-                if (drained > 0) engine!.pulseDrain();
-                // heat drains only pre-surge; during a surge the machine ignores it.
-                surge.decayHeat(HEAT_DECAY_PER_SEC * dt);
-                // drive the surge core-heat model (design §3, hkm.2): the ambient ramp
-                // climbs with surge time and the per-crit spikes land inside
-                // recordStrike above; when the core crosses critical temp the machine
-                // busts itself through its own exit seam (a no-op while idle). the bust
-                // spectacle — lava eruption — is hkm.4.
-                surge.tickHeat(dt);
-                // the surge now ends on the player's terms: BANK (spacebar or the HUD
-                // button) erupts the pot as one gold mega-mountain (design §3, hkm.3).
-                // the overheat bust is the other exit (hkm.4, not yet wired).
-                engine!.renderSurge(surge.active ? surge.pot : null);
-                // drive the staged physical-tell ladder (design §3): the world near the
-                // core reacts in a fixed order as the core heats toward critical, so the
-                // ride reads. consumes coreLoad only; 0 while idle clears the tells.
-                engine!.applyTells(surge.active ? surge.coreLoad : 0);
-                // the surge drone tracks the same coreLoad the tells consume, so the
-                // pitch rises with the physical danger and 0 silences it between surges.
-                audioRef.current.surgeDrone(surge.active ? surge.coreLoad : 0);
-                const events = stormEventsRef.current?.tick(s.elapsed) ?? [];
-                // a lightning front cracks audibly whether or not a rod is installed;
-                // rod strikes below fire their own cracks and the engine throttle
-                // collapses the overlap into at most two per window.
-                if (events.some((event) => event.type === "lightning-front")) {
-                    audioRef.current.lightning();
-                }
-                if (sprinklerRef.current) {
-                    tickSprinkler(e.simulation, sprinklerRef.current, s, dt);
-                }
-                if (lightningRodRef.current) {
-                    const rodStrikes = lightningRodStrikeCount(events, true);
-                    for (let i = 0; i < rodStrikes; i++) {
-                        runLightningRodStrike();
+                for (let step = 0; step < fixed.steps; step++) {
+                    const dt = SIM_STEP_SEC;
+                    const s = stateRef.current;
+                    const surge = surgeRef.current;
+                    s.elapsed += dt;
+                    tickAutoStriker(autoStrikerRef.current, dt, () => {
+                        engine!.pulseAutoStriker();
+                        // aim + heat are game-code decisions: an area-uniform strike-zone
+                        // point (seedable rng seam) and the cadence-scaled heat fill.
+                        runStrike(
+                            autoStrikerAim(engine!.storm.strikeZone, aimRng.current),
+                            autoStrikerStrikeHeat(autoStrikerRef.current),
+                            "automatic",
+                            autoStrikerSurgeHeat(autoStrikerRef.current)
+                        );
+                    });
+                    // the front's reward knob applies at the mint (design §4.5): the bog's
+                    // payoutMult scales essence as gold converts, mirroring the riskMult the
+                    // event scheduler already consumes. post-sim, so the in-world value
+                    // ledger stays conserved.
+                    const drained = applyPayoutModifier(e.storm.front, collector.collect(e.simulation));
+                    creditEssence(s, drained);
+                    // pulse the drain grate the frame it converts gold, so essence income
+                    // visibly originates FROM the drain rather than appearing on the HUD.
+                    if (drained > 0) engine!.pulseDrain();
+                    // heat drains only pre-surge; during a surge the machine ignores it.
+                    surge.decayHeat(HEAT_DECAY_PER_SEC * dt);
+                    // drive the surge core-heat model (design §3, hkm.2): the ambient ramp
+                    // climbs with surge time and the per-crit spikes land inside
+                    // recordStrike above; when the core crosses critical temp the machine
+                    // busts itself through its own exit seam (a no-op while idle). the bust
+                    // spectacle — lava eruption — is hkm.4.
+                    surge.tickHeat(dt);
+                    // the surge now ends on the player's terms: BANK (spacebar or the HUD
+                    // button) erupts the pot as one gold mega-mountain (design §3, hkm.3).
+                    // the overheat bust is the other exit (hkm.4, not yet wired).
+                    engine!.renderSurge(surge.active ? surge.pot : null);
+                    // drive the staged physical-tell ladder (design §3): the world near the
+                    // core reacts in a fixed order as the core heats toward critical, so the
+                    // ride reads. consumes coreLoad only; 0 while idle clears the tells.
+                    engine!.applyTells(surge.active ? surge.coreLoad : 0);
+                    // the surge drone tracks the same coreLoad the tells consume, so the
+                    // pitch rises with the physical danger and 0 silences it between surges.
+                    audioRef.current.surgeDrone(surge.active ? surge.coreLoad : 0);
+                    const events = stormEventsRef.current?.tick(s.elapsed) ?? [];
+                    // a lightning front cracks audibly whether or not a rod is installed;
+                    // rod strikes below fire their own cracks and the engine throttle
+                    // collapses the overlap into at most two per window.
+                    if (events.some((event) => event.type === "lightning-front")) {
                         audioRef.current.lightning();
                     }
-                }
-                hudTimer += dt;
-                if (hudTimer >= 0.1) {
-                    hudTimer = 0;
-                    const cutoff = performance.now() - CPS_WINDOW * 1000;
-                    clickTimesRef.current = clickTimesRef.current.filter((t) => t > cutoff);
-                    setCps(clickTimesRef.current.length / CPS_WINDOW);
-                    setHeat(surge.heat);
-                    const pot = surge.pot;
-                    // ignition edge: the frame heat crosses the threshold and the
-                    // surge goes live — latch a short window for the loud flash.
-                    if (surge.active && !prevSurgingRef.current) {
-                        igniteUntilRef.current = now + 1200;
+                    if (sprinklerRef.current) {
+                        tickSprinkler(e.simulation, sprinklerRef.current, s, dt);
                     }
-                    prevSurgingRef.current = surge.active;
-                    // capture edge: bump the sequence whenever the pot grew, so the
-                    // readout replays its land animation for every strike absorbed.
-                    if (pot.value > prevPotRef.current) captureSeqRef.current += 1;
-                    prevPotRef.current = pot.value;
-                    setSurgeHud({
-                        active: surge.active,
-                        potValue: pot.value,
-                        multiplier: pot.multiplier,
-                        crits: pot.crits,
-                        coreTemp: surge.coreTemp,
-                        criticalTemp: surge.criticalTemp,
-                        captureSeq: captureSeqRef.current,
-                        igniting: surge.active && now < igniteUntilRef.current,
-                    });
-                    setHud(snapshot(s, autoStrikerRef.current));
+                    if (lightningRodRef.current) {
+                        const rodStrikes = lightningRodStrikeCount(events, true);
+                        for (let i = 0; i < rodStrikes; i++) {
+                            runLightningRodStrike();
+                            audioRef.current.lightning();
+                        }
+                    }
+                    hudTimer += dt;
+                    if (hudTimer >= 0.1) {
+                        hudTimer = 0;
+                        const cutoff = performance.now() - CPS_WINDOW * 1000;
+                        clickTimesRef.current = clickTimesRef.current.filter((t) => t > cutoff);
+                        setCps(clickTimesRef.current.length / CPS_WINDOW);
+                        setHeat(surge.heat);
+                        const pot = surge.pot;
+                        // ignition edge: the frame heat crosses the threshold and the
+                        // surge goes live — latch a short window for the loud flash.
+                        if (surge.active && !prevSurgingRef.current) {
+                            igniteUntilRef.current = now + 1200;
+                        }
+                        prevSurgingRef.current = surge.active;
+                        // capture edge: bump the sequence whenever the pot grew, so the
+                        // readout replays its land animation for every strike absorbed.
+                        if (pot.value > prevPotRef.current) captureSeqRef.current += 1;
+                        prevPotRef.current = pot.value;
+                        setSurgeHud({
+                            active: surge.active,
+                            potValue: pot.value,
+                            multiplier: pot.multiplier,
+                            crits: pot.crits,
+                            coreTemp: surge.coreTemp,
+                            criticalTemp: surge.criticalTemp,
+                            captureSeq: captureSeqRef.current,
+                            igniting: surge.active && now < igniteUntilRef.current,
+                        });
+                        setHud(snapshot(s, autoStrikerRef.current));
+                        setGoal(stormGoal(s, autoStrikerRef.current.level, bestBankRef.current));
+                        setProjection(coreProjection(s));
+                    }
                 }
                 raf = requestAnimationFrame(frame);
             };
@@ -630,6 +650,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
         if (!surge.active) return;
         audioRef.current.unlock();
         const pot = surge.endSurge("bank");
+        bestBankRef.current = Math.max(bestBankRef.current, pot.value);
         if (pot.value > 0) {
             // forge wiring (design §5): the banked pot leaves through the same
             // eruption seam as un-captured strikes, so the eruption-value nodes
@@ -766,7 +787,15 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 onPointerMove={onStagePointerMove}
                 onPointerUp={stopPainting}
                 onPointerLeave={stopPainting}
-            />
+            >
+                <div className="stage-guide">
+                    <span className="front-tag">{markers.front} · storm {Math.floor(stateRef.current.elapsed / 60)} min</span>
+                    <strong>{surging ? "ONE MORE COULD CHANGE EVERYTHING" : goal.title}</strong>
+                    <p>{surging ? "Gold waits in the core. Space releases it. The next crit heats it." : goal.detail}</p>
+                </div>
+                <span className="world-label core-label" style={{ top: `${markers.coreY + 7}%` }}>storm core</span>
+                <span className="world-label drain-label" style={{ top: `${markers.drainY - 5}%` }}>↓ collector · gold → essence</span>
+            </div>
             {/* the hanging house sign over the screen: permanent cabinet
                 architecture, not a state readout. */}
             <div className="marquee-sign">
@@ -782,6 +811,11 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 <div className="payout">
                     <span className="payout-value">{formatNumber(hud.essence)}</span>
                     <span className="payout-label">essence</span>
+                </div>
+                <div className="storm-goal" aria-live="polite">
+                    <strong>{goal.title}</strong>
+                    <div className="goal-track"><span style={{ width: `${goal.progress * 100}%` }} /></div>
+                    <span>bank out now: {formatNumber(projection.cores)} cores · collected wealth only</span>
                 </div>
                 <div className="dps">
                     <span className="stat-val">{formatNumber(hud.dps)}</span>
@@ -883,10 +917,46 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                             </div>
                         </div>
                         <button className="bank-out-btn" onClick={bankOutStorm}>
-                            BANK OUT <em>end storm · keep all · ×1.5 cores</em>
+                            BANK OUT <em>collected wealth · ×1.5 cores</em>
                         </button>
                     </>
                 )}
+                <div className="brushes quick-machine">
+                    {hud.autoStrikerLevel === 0 && (
+                        <button className="brush" disabled={hud.essence < 60}
+                            onClick={() => toggleStructure("auto-striker")}>
+                            <span className="upgrade-name">Auto-Striker <em>60 essence</em></span>
+                            <span className="upgrade-desc">place your first machine · strikes while you build</span>
+                        </button>
+                    )}
+                    {hud.autoStrikerLevel > 0 && (
+                        <button
+                            className="brush"
+                            disabled={
+                                hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL ||
+                                !hud.autoStrikerAffordable
+                            }
+                            onClick={buyAutoStrikerUpgrade}
+                        >
+                            <span className="upgrade-name">
+                                Auto-Striker <em>lv{hud.autoStrikerLevel}</em>{" "}
+                                <em>
+                                    OC {hud.autoStrikerOverclockStacks}/{OVERCLOCK_MAX_STACKS}
+                                </em>
+                            </span>
+                            <span className="upgrade-desc">
+                                fires every {hud.autoStrikerInterval.toFixed(2)}s · +
+                                {hud.autoStrikerSurgeHeat.toFixed(1)} core heat in surge<br />
+                                bank at {OVERCLOCK_BANK_CRITS} crits to charge · bust drains 1
+                            </span>
+                            <span className="upgrade-cost">
+                                {hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL
+                                    ? "max"
+                                    : formatNumber(hud.autoStrikerCost)}
+                            </span>
+                        </button>
+                    )}
+                </div>
                 <div className="rank">
                     <div className="rank-label">
                         rank: <strong>{hud.rank.name}</strong>
@@ -934,38 +1004,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                 </div>
                 <div className="brushes">
                     <div className="brushes-label">structures</div>
-                    {hud.autoStrikerLevel > 0 && (
-                        <button
-                            className="brush"
-                            disabled={
-                                hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL ||
-                                !hud.autoStrikerAffordable
-                            }
-                            onClick={buyAutoStrikerUpgrade}
-                        >
-                            <span className="upgrade-name">
-                                Auto-Striker <em>lv{hud.autoStrikerLevel}</em>{" "}
-                                <em>
-                                    OC {hud.autoStrikerOverclockStacks}/{OVERCLOCK_MAX_STACKS}
-                                </em>
-                            </span>
-                            <span className="upgrade-desc">
-                                fires every {hud.autoStrikerInterval.toFixed(2)}s · +
-                                {hud.autoStrikerSurgeHeat.toFixed(1)} core heat in surge
-                            </span>
-                            <span className="upgrade-desc">
-                                bank at {OVERCLOCK_BANK_CRITS} crits to charge · bust drains 1
-                            </span>
-                            <span className="upgrade-cost">
-                                {hud.autoStrikerLevel >= AUTO_STRIKER_MAX_LEVEL
-                                    ? "max"
-                                    : formatNumber(hud.autoStrikerCost)}
-                            </span>
-                        </button>
-                    )}
-                    {STRUCTURES.filter(
-                        (structure) => structure.id !== "auto-striker" || hud.autoStrikerLevel === 0
-                    ).map((structure) => {
+                    {STRUCTURES.filter((structure) => structure.id !== "auto-striker").map((structure) => {
                         const installed = isStructureInstalled(structure.id, installedStructures);
                         return (
                             <button
@@ -994,7 +1033,7 @@ function StormView({ effects, onStormEnd }: StormViewProps) {
                         ? "click clear air to place · click the structure again to attack"
                         : selectedBrush
                           ? "drag on the storm to paint · click the brush again to attack"
-                          : "click anywhere to attack manually · catch falling 7 7 7"}
+                          : "aim above a collector · space banks a surge · spending never reduces core progress"}
                 </p>
             </aside>
         </div>
@@ -1013,6 +1052,7 @@ export function App() {
     const [mode, setMode] = useState<"workshop" | "storm">("workshop");
     const [lastStorm, setLastStorm] = useState<StormEndAccounting | null>(null);
     const [stormSeq, setStormSeq] = useState(0);
+    const [stormSeed, setStormSeed] = useState(0);
     // front selection is session-only: a reload starts at Flats, while a return
     // from Results keeps the choice in this App state.
     const [selectedFront, setSelectedFrontId] = useState<FrontId>(() => debugFront ?? "flats");
@@ -1046,6 +1086,9 @@ export function App() {
             debugFront ?? resolveFrontSelection(selectedFront, unlockedFronts).id;
         setSelectedFront(resolvedFront);
         setSelectedFrontId(resolvedFront);
+        const requestedSeed = new URLSearchParams(window.location.search).get("seed");
+        setStormSeed(requestedSeed !== null && Number.isFinite(Number(requestedSeed))
+            ? Number(requestedSeed) >>> 0 : (Date.now() + stormSeq * 0x9e3779b9) >>> 0);
         setStormSeq((n) => n + 1);
         setMode("storm");
     };
@@ -1063,6 +1106,6 @@ export function App() {
         );
     }
     return (
-        <StormView key={stormSeq} effects={workshopEffects(workshop)} onStormEnd={handleStormEnd} />
+        <StormView key={stormSeq} seed={stormSeed} effects={workshopEffects(workshop)} onStormEnd={handleStormEnd} />
     );
 }
