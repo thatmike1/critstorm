@@ -57,8 +57,12 @@ export function ResultsScreen({ summary, onNextStorm }: ResultsScreenProps) {
                     </div>
                     <div className="results-row">
                         <span className="results-key">gold lost to hazards</span>
-                        <span className="results-val loss">{formatNumber(summary.goldLost)}</span>
+                        <span className="results-val loss">{formatNumber(Math.max(0, summary.goldLost - (summary.goldLeftBehind ?? 0)))}</span>
                     </div>
+                    {(summary.goldLeftBehind ?? 0) > 0 && <div className="results-row">
+                        <span className="results-key">exposed gold left behind</span>
+                        <span className="results-val loss">{formatNumber(summary.goldLeftBehind ?? 0)}</span>
+                    </div>}
                     <div className="results-row">
                         <span className="results-key">surges ridden</span>
                         <span className="results-val">{summary.surgeCount}</span>

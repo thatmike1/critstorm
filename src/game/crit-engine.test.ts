@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Mat } from "../sim/materials";
 import { Simulation } from "../sim/simulation";
+import { createWorld } from "./world";
+import { depositEruption } from "./eruption";
 import { CritEngine } from "./crit-engine";
 import { SimLayer, type SimAudioSink } from "./sim-layer";
 
@@ -111,5 +113,22 @@ describe("CritEngine.attachAudio", () => {
 
         expect(firstAudio.calls).toHaveLength(0);
         expect(secondAudio.calls).toHaveLength(1);
+    });
+});
+
+describe("storm abandonment ledger", () => {
+    it("accounts for world cells and in-flight gold exactly once", () => {
+        const world = createWorld({ seed: 3 });
+        const { engine } = engineOver(world.sim);
+        depositEruption(world.sim, 20, 20, 1000, 0);
+        let lost = 0, destroyed = 0;
+        world.sim.setGoldLossListener(event => { lost += event.amount; });
+        Object.assign(engine, { world, eruptions: [{ gx: 10, gy: 10, payout: 250,
+            gfx: { destroy: () => { destroyed++; } } }] });
+        expect(engine.abandonGold()).toBeCloseTo(1250, 2);
+        expect(world.sim.totalValue()).toBe(0);
+        expect(lost).toBeCloseTo(1250, 2);
+        expect(destroyed).toBe(1);
+        expect(engine.abandonGold()).toBe(0);
     });
 });

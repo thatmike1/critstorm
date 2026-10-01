@@ -139,18 +139,22 @@ function clamp(v: number, lo: number, hi: number): number {
  *   impact; less than P if wall cells swallowed part of the blob). the value
  *   restored from prior overlapping deposits is NOT included — only the new share.
  */
-export function depositEruption(sim: Simulation, cx: number, cy: number, payout: number): number {
+export function depositEruption(sim: Simulation, cx: number, cy: number, payout: number, tier?: number): number {
     if (!(payout > 0)) return 0;
     const m = eruptionMass(payout);
     const per = payout / m;
     // resolve + filter target cells once so the two passes agree exactly.
-    const targets: { x: number; y: number }[] = [];
+    const unique = new Map<number, { x: number; y: number; shares: number }>();
     for (const { dx, dy } of blobOffsets(m)) {
         const x = clamp(cx + dx, 0, sim.W - 1);
         const y = clamp(cy + dy, 0, sim.H - 1);
         if (sim.cells[y * sim.W + x] === Mat.WALL) continue;
-        targets.push({ x, y });
+        const index = y * sim.W + x;
+        const target = unique.get(index);
+        if (target) target.shares++;
+        else unique.set(index, { x, y, shares: 1 });
     }
+    const targets = [...unique.values()];
     // capture any value the target already carries (overlapping still-molten cells)
     // BEFORE painting zeroes it, so pass 2 can restore it alongside the new share —
     // but ONLY when the paint actually zeroed it. GOLD→MOLTEN_GOLD is a value-
@@ -159,12 +163,20 @@ export function depositEruption(sim: Simulation, cx: number, cy: number, payout:
     // MOLTEN_GOLD→MOLTEN_GOLD (and any non-carry paint) zeroes it, so restore then.
     const prior = targets.map(({ x, y }) => ({
         value: sim.getValue(x, y),
+        heat: sim.heat[y * sim.W + x],
         carried: sim.cells[y * sim.W + x] === Mat.GOLD,
     }));
     for (const { x, y } of targets) sim.paint(x, y, 0, Mat.MOLTEN_GOLD);
-    targets.forEach(({ x, y }, i) => {
+    targets.forEach(({ x, y, shares }, i) => {
         const restore = prior[i].carried ? 0 : prior[i].value;
-        sim.addValue(x, y, restore + per);
+        sim.addValue(x, y, restore + per * shares);
+        if (tier !== undefined) sim.heat[y * sim.W + x] = Math.max(prior[i].heat, eruptionTemperature(tier));
     });
-    return per * targets.length;
+    return per * targets.reduce((count, target) => count + target.shares, 0);
+}
+
+/** map the design's crit tiers onto actual deposited thermal energy. */
+export function eruptionTemperature(tier: number): number {
+    const temperatures = [60, 90, 130, 170, 210, 260, 330, 450, 650];
+    return temperatures[Math.max(0, Math.min(8, Math.floor(tier)))];
 }

@@ -1,10 +1,11 @@
 import { Mat } from "../sim/materials";
 import type { Simulation } from "../sim/simulation";
+import { COLLECTOR_PURCHASE_COST } from "./routing";
 import { AUTO_STRIKER_PURCHASE_COST } from "./auto-striker";
 import type { EconomyState } from "./economy";
 
 /** structure identifiers available in the in-storm placement flow. */
-export type StructureId = "auto-striker" | "magnet" | "sprinkler" | "lightning-rod";
+export type StructureId = "auto-striker" | "magnet" | "sprinkler" | "lightning-rod" | "collector";
 
 /** structures with one installed instance per storm. */
 export type SingularStructureId = "sprinkler" | "lightning-rod";
@@ -52,6 +53,7 @@ export const MAGNET_RADIUS = 36;
 
 /** structure catalogue for one-click placement rather than brush painting. */
 export const STRUCTURES: StructureDef[] = [
+    { id: "collector", name: "Collector", desc: "new surface drain · choose a separate gold route", cost: COLLECTOR_PURCHASE_COST },
     {
         id: "auto-striker",
         name: "Auto-Striker",

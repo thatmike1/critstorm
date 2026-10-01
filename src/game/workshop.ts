@@ -239,7 +239,7 @@ const AEGIS_NODES: readonly WorkshopNodeDef[] = [
     },
     {
         name: "Ceramic Liner",
-        desc: "core critical temp +30 more",
+        desc: "core critical temp +30 more · Ice from storm start",
         effect: { kind: "critical-temp", bonus: 30 },
     },
     {
@@ -249,7 +249,7 @@ const AEGIS_NODES: readonly WorkshopNodeDef[] = [
     },
     {
         name: "Braced Core",
-        desc: "core critical temp +40 more",
+        desc: "core critical temp +40 more · Wall at +140 total",
         effect: { kind: "critical-temp", bonus: 40 },
     },
     {
@@ -264,7 +264,7 @@ const AEGIS_NODES: readonly WorkshopNodeDef[] = [
     },
     {
         name: "Tungsten Ribs",
-        desc: "core critical temp +40 more",
+        desc: "core critical temp +40 more · Wall at +140 total",
         effect: { kind: "critical-temp", bonus: 40 },
     },
     {
@@ -506,14 +506,13 @@ export interface WorkshopEffects {
     eruptionValueMultiplier: number;
     /** Vault: total reduction subtracted from the base collector fee. */
     collectorFeeReduction: number;
-    /** Vault: extra collector drains beyond the first. CONSUMED LATER — the world
-     * bootstraps a single drain today; multi-drain placement is future wiring. */
+    /** Vault: extra collector drains beyond the first, placed on the left and right routes. */
     extraCollectors: number;
     /** Vault: essence granted at storm start. granted spendable-only — it was not
      * collected this storm, so it never counts toward core conversion (design §5). */
     startingEssence: number;
     /** Aegis: permanent multipliers on each defense brush's per-cell essence cost. */
-    brushCostMultipliers: Record<BrushId, number>;
+    brushCostMultipliers: Partial<Record<BrushId, number>>;
     /** Aegis: multiplier on the surge ambient heat coefficient (<1 resists heat). */
     ambientHeatMultiplier: number;
     /** Aegis: degrees added to the surge core critical temperature. */
@@ -521,8 +520,7 @@ export interface WorkshopEffects {
     /** Front: highest front ordinal unlocked (1 = Flats, 2 = Bog). The session
      * picker exposes implemented fronts; higher ordinals are consumed as fronts land. */
     unlockedFronts: number;
-    /** Front: permanent storm event modifiers. CONSUMED LATER — the scheduler
-     * takes no modifiers until npq.1 wires them in. */
+    /** Front: permanent severity modifiers consumed by the storm scheduler. */
     eventModifiers: readonly StormEventModifier[];
     /** Front: minimum tier for a captured crit during a live surge. */
     surgeTierFloor: number;
@@ -570,7 +568,7 @@ export function workshopEffects(state: WorkshopState): WorkshopEffects {
                     fx.startingEssence += effect.amount;
                     break;
                 case "brush-cost-multiplier":
-                    fx.brushCostMultipliers[effect.brush] *= effect.multiplier;
+                    fx.brushCostMultipliers[effect.brush] = (fx.brushCostMultipliers[effect.brush] ?? 1) * effect.multiplier;
                     break;
                 case "heat-resistance":
                     fx.ambientHeatMultiplier *= effect.multiplier;
@@ -611,7 +609,7 @@ export function ambientCoeffWith(fx: WorkshopEffects): number {
 
 /** return a defense brush's effective per-cell cost after permanent Aegis discounts. */
 export function brushCostWith(fx: WorkshopEffects, brush: BrushDef): number {
-    const cost = brush.costPerCell * fx.brushCostMultipliers[brush.id];
+    const cost = brush.costPerCell * (fx.brushCostMultipliers[brush.id] ?? 1);
     return cost > 0 && Number.isFinite(cost) ? cost : Number.EPSILON;
 }
 

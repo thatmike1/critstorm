@@ -15,6 +15,7 @@
  *        --seed <int> --mode <storm|pacing|late-pacing|economy>
  *        --auto-striker <enabled|disabled> --overclock <enabled|disabled>
  */
+import { runRoutingBalance } from "./routing-bench";
 import { buy, createState, critChance, critMulti, expectedDps, tick } from "../src/game/economy";
 import { formatNumber } from "../src/game/format";
 import { strategyByName } from "./bot-strategy";
@@ -28,7 +29,7 @@ import {
 } from "./storm-bot";
 
 interface CliArgs {
-    mode: "storm" | "pacing" | "late-pacing" | "economy";
+    mode: "storm" | "pacing" | "late-pacing" | "economy" | "routing";
     durationMin: number;
     strategy: string;
     seed: number;
@@ -61,7 +62,7 @@ function parseArgs(argv: string[]): CliArgs {
                     value !== "storm" &&
                     value !== "pacing" &&
                     value !== "late-pacing" &&
-                    value !== "economy"
+                    value !== "economy" && value !== "routing"
                 ) {
                     throw new Error(
                         `--mode must be storm|pacing|late-pacing|economy, got ${value}`
@@ -228,6 +229,7 @@ function printStorm(summary: StormSummary): void {
 
 function main(): void {
     const args = parseArgs(process.argv.slice(2));
+    if (args.mode === "routing") { runRoutingBalance(); return; }
     if (args.mode === "economy") {
         runEconomyMode(args.durationMin, args.seed);
         return;

@@ -2,9 +2,9 @@ import { Mat } from "../sim/materials";
 import type { Simulation } from "../sim/simulation";
 import type { EconomyState } from "./economy";
 
-/** defense brush identifiers (design §4.2). v0.1 ships stone + water only;
- * ice/wall follow later with the rest of the epic. */
-export type BrushId = "stone" | "water";
+/** defense brush identifiers (design §4.2). stone/water are starter tools;
+ * Ice and Wall unlock through collected wealth or Aegis. */
+export type BrushId = "stone" | "water" | "ice" | "wall";
 
 export interface BrushDef {
     id: BrushId;
@@ -44,6 +44,8 @@ export const BRUSHES: BrushDef[] = [
         costPerCell: 7,
         radius: 3,
     },
+    { id: "ice", name: "Ice", desc: "cold reserve · +10 headroom per nearby cell", mat: Mat.ICE, costPerCell: 14, radius: 2 },
+    { id: "wall", name: "Wall", desc: "permanent channels · cannot be melted", mat: Mat.WALL, costPerCell: 50, radius: 2 },
 ];
 
 /** look up a brush definition by id. */
@@ -92,7 +94,7 @@ export function fullStrokeCost(brush: BrushDef): number {
 function paintable(sim: Simulation, x: number, y: number, mat: number): boolean {
     const c = sim.cells[y * sim.W + x];
     if (c === mat) return false;
-    if (c === Mat.WALL || c === Mat.GOLD || c === Mat.MOLTEN_GOLD) return false;
+    if (c === Mat.WALL || c === Mat.METAL || c === Mat.GOLD || c === Mat.MOLTEN_GOLD || sim.getValue(x, y) > 0) return false;
     return true;
 }
 
@@ -140,4 +142,9 @@ export function paintBrush(
         }
     }
     return painted;
+}
+
+/** earned advanced brushes stay available for this storm; Aegis grants earlier access. */
+export function brushUnlocked(id: BrushId, collected: number, criticalTempBonus: number): boolean {
+    return id === "stone" || id === "water" || (id === "ice" ? collected >= 500 || criticalTempBonus >= 60 : collected >= 5000 || criticalTempBonus >= 140);
 }

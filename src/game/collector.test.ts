@@ -9,6 +9,7 @@ import { COLLECTOR_BASE_FEE } from "./economy";
 function placeGold(sim: Simulation, x: number, y: number, value: number): void {
     sim.cells[y * sim.W + x] = Mat.GOLD;
     sim.addValue(x, y, value);
+    if (y + 1 < sim.H && sim.cells[(y + 1) * sim.W + x] === Mat.EMPTY) sim.paint(x, y + 1, 0, Mat.STONE);
 }
 
 const FULL_REGION = (sim: Simulation): CollectorRegion => ({ x: 0, y: 0, w: sim.W, h: sim.H });
@@ -155,5 +156,26 @@ describe("defaultCollectorRegion", () => {
         const world = createWorld({ seed: 2 });
         const collector = new Collector(defaultCollectorRegion(world));
         expect(collector.fee).toBe(COLLECTOR_BASE_FEE);
+    });
+});
+
+describe("collector hazard contact", () => {
+    it("leaves airborne gold exposed until it actually rests on the ground", () => {
+        const sim = new Simulation(8, 8);
+        placeGold(sim, 3, 4, 100);
+        sim.paint(3, 5, 0, Mat.EMPTY);
+        const collector = new Collector(FULL_REGION(sim));
+        expect(collector.collect(sim)).toBe(0);
+        expect(sim.totalValue()).toBe(100);
+        sim.paint(3, 5, 0, Mat.STONE);
+        expect(collector.collect(sim)).toBe(70);
+    });
+    it("lets lava endanger cold arriving gold before minting it as essence", () => {
+        const sim = new Simulation(8, 8);
+        sim.paint(3, 5, 0, Mat.LAVA);
+        placeGold(sim, 3, 4, 100);
+        const collector = new Collector(FULL_REGION(sim));
+        expect(collector.collect(sim)).toBe(0);
+        expect(sim.totalValue()).toBe(100);
     });
 });

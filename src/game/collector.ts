@@ -79,6 +79,19 @@ export class Collector {
         for (let y = y0; y < y1; y++) {
             for (let x = x0; x < x1; x++) {
                 if (sim.cells[y * sim.W + x] !== Mat.GOLD) continue;
+                // only settled gold can enter the drain; an airborne grain must encounter the floor.
+                if (y + 1 < sim.H) {
+                    const below = sim.cells[(y + 1) * sim.W + x];
+                    if (below === Mat.EMPTY || below === Mat.SMOKE || below === Mat.STEAM ||
+                        below === Mat.FIRE || below === Mat.WATER || below === Mat.OIL ||
+                        below === Mat.ACID || below === Mat.MOLTEN_GOLD) continue;
+                }
+                // contact with lava has to resolve in physics before a drain can rescue cold gold.
+                const index = y * sim.W + x;
+                if ((y > 0 && sim.cells[index - sim.W] === Mat.LAVA) ||
+                    (y + 1 < sim.H && sim.cells[index + sim.W] === Mat.LAVA) ||
+                    (x > 0 && sim.cells[index - 1] === Mat.LAVA) ||
+                    (x + 1 < sim.W && sim.cells[index + 1] === Mat.LAVA)) continue;
                 essence += valueToEssence(sim.getValue(x, y), this.fee);
                 // remove the collected cell via the silent drain: clears the cell and
                 // zeroes its value WITHOUT firing an erase loss event — collection is

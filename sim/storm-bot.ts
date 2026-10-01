@@ -40,9 +40,10 @@ import { mulberry32, withSeededRandom } from "./rng";
 export const PACING_STEP_SEC = 0.05;
 
 /**
- * conservative core-to-drain delay for competent flats routing. real 320x180
- * world parity tests collect core-centred eruptions completely within 62 frames
- * (3.1s at 20Hz); queued value remains physically pending until this delay elapses.
+ * approximate first-arrival delay for competent flats routing (3.1s at 20Hz).
+ * the live collector waits for ground support; its last cells settle by 67 frames
+ * in the parity fixtures. this diagnostic queues each whole payout together,
+ * rather than modelling individual travel times or terrain hazards.
  */
 export const PACING_COLLECTION_DELAY_SEC = 3.1;
 

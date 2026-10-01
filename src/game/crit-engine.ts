@@ -118,6 +118,7 @@ export class CritEngine {
     private stage: Container;
     private eruptLayer: Container;
     private drainMarker: DrainMarker;
+    private extraDrainMarkers: DrainMarker[] = [];
     private autoStriker: AutoStrikerRenderer;
     private coreGlow: Graphics;
     private glowPulse = 0;
@@ -222,12 +223,24 @@ export class CritEngine {
         this.drainMarker.setRegion(region, this.world.sim.W, this.world.sim.H);
     }
 
+    /** show every installed routing catchment with the same physical grate. */
+    setDrainRegions(regions: readonly CollectorRegion[]): void {
+        this.setDrainRegion(regions[0]);
+        for (const marker of this.extraDrainMarkers) marker.gfx.destroy();
+        this.extraDrainMarkers = regions.slice(1).map((region) => {
+            const marker = new DrainMarker();
+            marker.setRegion(region, this.world.sim.W, this.world.sim.H);
+            this.app.stage.addChildAt(marker.gfx, 2);
+            return marker;
+        });
+    }
+
     /**
      * pulse the drain marker: the collector converted gold to essence this frame, so
      * flare the grate + bloom upward, making income read as coming FROM the drain.
      */
-    pulseDrain(): void {
-        this.drainMarker.collected();
+    pulseDrain(index = 0): void {
+        (index === 0 ? this.drainMarker : this.extraDrainMarkers[index - 1])?.collected();
     }
 
     /** show the auto-striker marker at its placed grid position, or hide it with null. */
@@ -377,6 +390,27 @@ export class CritEngine {
         const heft = Math.min(1, Math.log10(1 + payout) / 6);
         this.flashScreen(0xffd75e, 0.35 + heft * 0.35);
         this.shake(16 + heft * 12);
+    }
+
+    /** account for every exposed cell and queued payout when the player leaves a storm. */
+    abandonGold(): number {
+        const sim = this.world.sim;
+        let abandoned = 0;
+        for (let index = 0; index < sim.value.length; index++) {
+            const value = sim.value[index];
+            if (!(value > 0)) continue;
+            const x = index % sim.W, y = Math.floor(index / sim.W);
+            sim.reportLoss(x, y, value, "abandon");
+            sim.drainCell(x, y);
+            abandoned += value;
+        }
+        for (const eruption of this.eruptions) {
+            sim.reportLoss(eruption.gx, eruption.gy, eruption.payout, "abandon");
+            abandoned += eruption.payout;
+            eruption.gfx.destroy();
+        }
+        this.eruptions = [];
+        return abandoned;
     }
 
     /**
@@ -617,7 +651,8 @@ export class CritEngine {
             e.gfx.position.set(x, e.sy + (e.ey - e.sy) * u - lift);
             e.gfx.scale.set(1 - u * 0.3);
             if (u < 1) continue;
-            depositEruption(this.world.sim, e.gx, e.gy, e.payout);
+            const deposited = depositEruption(this.world.sim, e.gx, e.gy, e.payout, e.tier);
+            this.world.sim.reportLoss(e.gx, e.gy, Math.max(0, e.payout - deposited), "blocked");
             this.eruptLayer.removeChild(e.gfx);
             e.gfx.destroy();
             this.eruptions.splice(i, 1);
@@ -640,6 +675,7 @@ export class CritEngine {
         // breathe + redraw the drain grate over the (resized) stage; the pulse decays
         // here so a collection flare fades even on frames the sim advanced no steps.
         this.drainMarker.update(dt, this.app.screen.width, this.app.screen.height);
+        for (const marker of this.extraDrainMarkers) marker.update(dt, this.app.screen.width, this.app.screen.height);
         this.autoStriker.update(dt, this.app.screen.width, this.app.screen.height);
         // breathe the surge core glow each frame so the pot reads as living molten
         // matter; only redraws while a pot is latched (design §3 render seam).

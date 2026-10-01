@@ -1,5 +1,6 @@
 import { Mat } from "../sim/materials";
 import type { StormEventWeights } from "./fronts";
+import type { StormEventModifier } from "./workshop";
 import type { World } from "./world";
 
 /** a deterministic source of random values in the half-open range [0, 1). */
@@ -126,7 +127,7 @@ function isEmpty(world: World, x: number, y: number): boolean {
 /** paint value-carrying solid gold across the sky without overwriting existing value. */
 function triggerGoldRain(world: World, severity: number, rng: StormEventRng): StormEvent {
     const { sim } = world;
-    const width = Math.min(sim.W, 3 + severity * 2);
+    const width = Math.min(sim.W, Math.round(3 + severity * 2));
     const start = randomInt(rng, 0, sim.W - width);
     const cells: StormEventCell[] = [];
     for (let x = start; x < start + width; x++) {
@@ -147,7 +148,7 @@ function triggerGoldRain(world: World, severity: number, rng: StormEventRng): St
 /** paint an acid band at the top of the world without overwriting gold in play. */
 function triggerAcidDrizzle(world: World, severity: number, rng: StormEventRng): StormEvent {
     const { sim } = world;
-    const width = Math.min(sim.W, 4 + severity * 4);
+    const width = Math.min(sim.W, Math.round(4 + severity * 4));
     const start = randomInt(rng, 0, sim.W - width);
     const cells: StormEventCell[] = [];
     for (let x = start; x < start + width; x++) {
@@ -161,7 +162,7 @@ function triggerAcidDrizzle(world: World, severity: number, rng: StormEventRng):
 /** open a hot lava crack in the terrain floor without overwriting value-carrying cells. */
 function triggerLavaFissure(world: World, severity: number, rng: StormEventRng): StormEvent {
     const { sim } = world;
-    const width = Math.min(sim.W, severity * 2 + 1);
+    const width = Math.min(sim.W, Math.round(severity * 2 + 1));
     const start = randomInt(rng, 0, sim.W - width);
     const cells: StormEventCell[] = [];
     for (let x = start; x < start + width; x++) {
@@ -173,14 +174,14 @@ function triggerLavaFissure(world: World, severity: number, rng: StormEventRng):
     }
     if (cells.length > 0) {
         const centre = cells[Math.floor(cells.length / 2)];
-        sim.injectHeat(centre.x, centre.y, severity + 1, 720 + severity * 40);
+        sim.injectHeat(centre.x, centre.y, Math.ceil(severity + 1), 720 + severity * 40);
     }
     return { type: "lava-fissure", severity, elapsed: 0, cells, erupted: 0 };
 }
 
 /** trace seeded physical lightning bolts; one event remains one semantic event. */
 function triggerLightningFront(world: World, severity: number, rng: StormEventRng): StormEvent {
-    const bolts = Math.min(3, Math.max(1, severity));
+    const bolts = Math.min(3, Math.max(1, Math.round(severity)));
     const changed = new Map<number, StormEventCell>();
     for (let i = 0; i < bolts; i++) {
         const x = randomInt(rng, 0, world.sim.W - 1);
@@ -196,9 +197,10 @@ export function triggerStormEvent(
     world: World,
     type: StormEventType,
     severity: number,
-    rng: StormEventRng
+    rng: StormEventRng,
+    strength = 1
 ): StormEvent {
-    const normalized = normalizedSeverity(severity);
+    const normalized = normalizedSeverity(severity) * Math.max(0.1, Math.min(8, strength));
     switch (type) {
         case "gold-rain":
             return triggerGoldRain(world, normalized, rng);
@@ -216,11 +218,20 @@ export class StormEvents {
     /** total gold value newly erupted by gold-rain events in this storm. */
     totalErupted = 0;
     private nextEventAt = INITIAL_STORM_EVENT_CADENCE;
+    private nextType: StormEventType;
 
     constructor(
         private readonly world: World,
-        private readonly rng: StormEventRng
-    ) {}
+        private readonly rng: StormEventRng,
+        private readonly upgrades: readonly StormEventModifier[] = []
+    ) {
+        this.nextType = chooseStormEventType(rng, world.front.eventWeights);
+    }
+
+    /** forecast the next physical event so preparation is an actual choice. */
+    get forecast(): { type: StormEventType; at: number } {
+        return { type: this.nextType, at: this.nextEventAt };
+    }
 
     /**
      * dispatch every event due at `elapsed`, returning them in scheduled order.
@@ -235,10 +246,13 @@ export class StormEvents {
             const scheduledAt = this.nextEventAt;
             const event = triggerStormEvent(
                 this.world,
-                chooseStormEventType(this.rng, eventWeights),
+                this.nextType,
                 stormEventSeverity(scheduledAt),
-                this.rng
+                this.rng,
+                this.upgrades.filter((upgrade) => upgrade.event === this.nextType)
+                    .reduce((strength, upgrade) => strength * upgrade.severityMultiplier, 1)
             );
+            this.nextType = chooseStormEventType(this.rng, eventWeights);
             const timedEvent: StormEvent = { ...event, elapsed: scheduledAt };
             events.push(timedEvent);
             this.totalErupted += timedEvent.erupted;

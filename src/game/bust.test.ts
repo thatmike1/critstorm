@@ -247,7 +247,7 @@ function strikeSeries(bust: boolean, dx = 0): RunResult {
         const sy = world.floorHeightAt(sx) - 12; // in the air above the drain
         let essence = 0;
         for (let i = 0; i < STRIKES; i++) {
-            depositEruption(sim, sx, sy, PAYOUT);
+            depositEruption(sim, sx, sy, PAYOUT, 0);
             for (let j = 0; j < STEPS_PER_STRIKE; j++) {
                 sim.step();
                 essence += collector.collect(sim);
@@ -309,7 +309,7 @@ describe("bustPot — striking the same spot after a bust is measurably worse", 
         // the clean run banks everything it deposits — the spot is a good one.
         expectClose(clean.essence, STRIKES * PAYOUT);
         expect(clean.lavaLoss).toBe(0);
-        // after a bust the SAME spot bleeds: measured 2022 of 18000 (11%). the gate is
+        // after a bust the SAME spot bleeds: grounded gold cannot bypass the lava. the gate is
         // loose enough to survive sim tuning but far outside noise.
         expect(busted.essence).toBeLessThan(clean.essence * 0.5);
         expect(busted.lavaLoss).toBeGreaterThan(clean.essence * 0.4);
@@ -321,7 +321,7 @@ describe("bustPot — striking the same spot after a bust is measurably worse", 
         // the pool floods the middle of the drain, NOT its whole width, and the sim's
         // own lava spreading only creeps outward over the following seconds. so the
         // reach falls off with distance: measured at the far edge of the drain the same
-        // series banks 16370 (93% of its clean take) against 2022 (11%) under the core.
+        // series retains over 75% of its clean take while the central route burns.
         // this is the "route around or clear it" affordance — a bust that punished
         // every column equally would just be a tax with no decision in it.
         const centre = strikeSeries(true, 0);

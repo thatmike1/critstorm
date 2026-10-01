@@ -95,7 +95,7 @@ function goldPhaseCarry(from: number, to: number): boolean {
  * and never lands as gold, so its value is lost without a value-field cell backing
  * it — reported through {@link Simulation.reportLoss} rather than an in-world path.
  */
-export type GoldLossCause = "acid" | "lava" | "erase" | "bust";
+export type GoldLossCause = "abandon" | "blocked" | "acid" | "lava" | "erase" | "bust";
 
 /**
  * a single gold-value loss: the doomed cell (x,y), the `amount` of value about to
@@ -984,16 +984,20 @@ export class Simulation {
 
     // ---- movement primitives ----------------------------------------------
 
-    /** Move (x,y) into (tx,ty) if empty, or swap if target is a lighter movable. */
+    /** move (x,y) into (tx,ty) if empty, or swap if target is a lighter movable. */
     private tryMove(x: number, y: number, tx: number, ty: number, m: number): boolean {
         if (tx < 0 || ty < 0 || tx >= this.W || ty >= this.H) return false;
         const tm = this.cells[ty * this.W + tx];
         if (tm === Mat.EMPTY) {
+            const carriedHeat = m === Mat.MOLTEN_GOLD ? this.heat[y * this.W + x] : 0;
             this.swap(x, y, tx, ty);
+            if (carriedHeat > 0) this.heat[ty * this.W + tx] = Math.max(this.heat[ty * this.W + tx], carriedHeat);
             return true;
         }
         if (isMovable(tm) && density[m] > density[tm]) {
+            const carriedHeat = m === Mat.MOLTEN_GOLD ? this.heat[y * this.W + x] : 0;
             this.swap(x, y, tx, ty);
+            if (carriedHeat > 0) this.heat[ty * this.W + tx] = Math.max(this.heat[ty * this.W + tx], carriedHeat);
             return true;
         }
         return false;
@@ -1256,7 +1260,7 @@ export class Simulation {
             const first = this.rng() < 0.5 ? -1 : 1;
             if (this.moveLava(x, y, x + first, y + 1)) return;
             if (this.moveLava(x, y, x - first, y + 1)) return;
-            if (this.rng() < 0.3) {
+            if (this.rng() < 0.05) {
                 if (this.moveLava(x, y, x + first, y)) return;
                 if (this.moveLava(x, y, x - first, y)) return;
             }

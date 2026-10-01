@@ -99,8 +99,8 @@ describe("fresh storm pacing bot", () => {
     });
 
     it("bounds delayed collection by the real core-to-drain physical path", () => {
-        const frames = Math.round(PACING_COLLECTION_DELAY_SEC / PACING_STEP_SEC);
-        expect(frames).toBe(62);
+        const frames = Math.round(PACING_COLLECTION_DELAY_SEC / PACING_STEP_SEC) + 5;
+        expect(frames).toBe(67);
         for (const seed of [3, 7, 42]) {
             const result = withSeededRandom(seed, () => {
                 const world = createWorld({ seed });

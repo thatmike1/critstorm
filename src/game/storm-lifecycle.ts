@@ -44,6 +44,8 @@ export function bustTriggersBlowUp(
  * storm's running stats.
  */
 export interface StormSummary extends StormEndAccounting {
+    /** exposed gold explicitly abandoned when the storm ends. */
+    goldLeftBehind?: number;
     /** gold value lost to hazards this storm (acid, lava, erase, busted pots). */
     goldLost: number;
     /** surges ignited this storm. */

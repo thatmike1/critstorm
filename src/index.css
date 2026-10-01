@@ -1380,3 +1380,11 @@ button:disabled .upgrade-cost {
 .workshop-intro > span { font-size: 10px; color: var(--ink-dim); }
 .stage { touch-action: none; }
 .quick-machine .brush { width: 100%; }
+.routing-status { display: flex; flex-direction: column; gap: 3px; font: 17px var(--font-num); color: #9af0ff; }
+.event-callout { position: absolute; right: 20px; bottom: 16px; z-index: 4; padding: 7px 10px; background: var(--black); color: var(--gold); font: 18px var(--font-num); pointer-events: none; }
+.tool-dock { position: absolute; left: 20px; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 10px; }
+.tool-dock button { padding: 8px; border: 2px solid var(--gold-dim); background: var(--black); color: var(--gold); font: 10px var(--font-label); cursor: pointer; }
+.tool-dock button[aria-pressed=true] { border-color: var(--gold); }
+.tool-dock em { font: 14px var(--font-num); }
+.tool-dock > span { font: 16px var(--font-num); color: var(--ink); background: var(--black); padding: 5px; }
+.tool-cursor { position: absolute; z-index: 8; pointer-events: none; border: 2px dashed #9af0ff; padding: 8px; transform: translate(-50%, -50%); color: #9af0ff; font: 15px var(--font-num); background: #120204b0; }

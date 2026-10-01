@@ -206,6 +206,7 @@ export class Surge {
     private readonly listeners: SurgeListeners;
     private readonly rng: SurgeRng;
     private readonly _criticalTemp: number;
+    private coolingCapacity = 0;
     private readonly ambientCoeff: number;
     private readonly tierFloor: number;
     private readonly payoutForTier: SurgeOptions["payoutForTier"];
@@ -258,7 +259,7 @@ export class Surge {
 
     /** the temperature at which the core busts (design §3/§6); Aegis-tunable per surge. */
     get criticalTemp(): number {
-        return this._criticalTemp;
+        return this._criticalTemp + this.coolingCapacity;
     }
 
     /**
@@ -267,7 +268,7 @@ export class Surge {
      * `coreLoad`.
      */
     get coreLoad(): number {
-        return Math.min(1, Math.max(0, this._coreTemp / this._criticalTemp));
+        return Math.min(1, Math.max(0, this._coreTemp / this.criticalTemp));
     }
 
     /**
@@ -336,6 +337,12 @@ export class Surge {
         this.addCoreHeat(this.ambientCoeff * this._crits * this._crits * dtSec);
     }
 
+    /** update temporary coolant protection; losing it can physically rupture a hot core. */
+    setCoolingCapacity(capacity: number): void {
+        this.coolingCapacity = Number.isFinite(capacity) ? Math.max(0, Math.min(380, capacity)) : 0;
+        if (this.active && this._coreTemp >= this.criticalTemp) this.endSurge("bust");
+    }
+
     /** add deterministic external heat while a surge is live. */
     addExternalCoreHeat(delta: number): void {
         if (this._phase !== "surging" || !(delta > 0) || !Number.isFinite(delta)) return;
@@ -377,8 +384,8 @@ export class Surge {
      */
     private addCoreHeat(delta: number): void {
         this._coreTemp += Math.max(0, delta);
-        this.listeners.onCoreTempChange?.(this._coreTemp, this._criticalTemp);
-        if (this._coreTemp >= this._criticalTemp) this.endSurge("bust");
+        this.listeners.onCoreTempChange?.(this._coreTemp, this.criticalTemp);
+        if (this._coreTemp >= this.criticalTemp) this.endSurge("bust");
     }
 
     /** zero the heat + pot + core-temp bookkeeping without touching the phase. */

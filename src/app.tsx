@@ -24,10 +24,10 @@ import { markFirstSurge, type StormEndAccounting, type StormEndReason } from "./
 import { bustTriggersBlowUp, StormLifecycle, type StormSummary } from "./game/storm-lifecycle";
 import { ResultsScreen } from "./results-screen";
 import { formatNumber } from "./game/format";
-import { Collector, defaultCollectorRegion } from "./game/collector";
+import { createRouting, placeCollector, buyEfficiency, efficiencyCost, coolantHeadroom, type RoutingState } from "./game/routing";
 import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
-import { BRUSHES, paintBrush, canPaint, type BrushId, type BrushDef } from "./game/brush";
+import { BRUSHES, paintBrush, canPaint, brushUnlocked, type BrushId, type BrushDef } from "./game/brush";
 import { lightningRodStrikeCount, StormEvents, createStormEventRng } from "./game/storm-events";
 import {
     applyPayoutModifier,
@@ -196,6 +196,12 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     const aimRng = useRef(createStormEventRng(seed ^ 0xa17));
     const spikeRng = useRef(createStormEventRng(seed ^ 0x5a1ce));
     const bestBankRef = useRef(0);
+    const endingRef = useRef(false);
+    const routingRef = useRef<RoutingState | null>(null);
+    const [routingHud, setRoutingHud] = useState({ count: 1, fee: collectorFeeWith(effects), cost: 120, shield: 0, worldGold: 0 });
+    const [forecast, setForecast] = useState({ type: "weather gathering", seconds: 42, last: "" });
+    const lastEventRef = useRef({ name: "", until: 0 });
+    const [toolCursor, setToolCursor] = useState<{ x: number; y: number } | null>(null);
     const [goal, setGoal] = useState(() => stormGoal(initialState.economy, 0, 0));
     const [projection, setProjection] = useState(() => coreProjection(initialState.economy));
     const [markers, setMarkers] = useState({ coreY: 38, drainY: 70, front: "The Flats" });
@@ -328,6 +334,9 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
         source: StrikeSource = "manual",
         capturedAutoCoreHeat = 0
     ): void => {
+        const engine = engineRef.current;
+        if (!engine || endingRef.current) return;
+        surgeRef.current.setCoolingCapacity(coolantHeadroom(engine.storm));
         executeStrike(
             stateRef.current,
             surgeRef.current,
@@ -396,30 +405,28 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
             // storm events replace the old falling-777 bonus with deterministic
             // in-world pressure (design §4.4). its rng is isolated from combat rolls
             // so the same storm duration always schedules the same world events.
-            stormEventsRef.current = new StormEvents(e.storm, createStormEventRng(seed ^ 0x5700_7001));
+            stormEventsRef.current = new StormEvents(e.storm, createStormEventRng(seed ^ 0x5700_7001), effects.eventModifiers);
             // the drain: solid gold settling in this band becomes essence at
             // (1 - fee). essence now flows ONLY through here (applyAttack no longer
             // credits it), so an attack pays out only once its gold reaches home.
             // vault wiring (design §5): the workshop drives the skim fee down from
             // its 30% base, so more of each arriving gold cell mints as essence.
-            const collector = new Collector(
-                defaultCollectorRegion(e.storm),
-                collectorFeeWith(effects)
-            );
-            // show the drain on screen (design pillar 4): the marker grate marks the
-            // catchment so gold reaching it reads as banked, not silently vanished.
-            e.setDrainRegion(collector.region);
+            const routing = createRouting(e.storm, collectorFeeWith(effects), effects.extraCollectors);
+            routingRef.current = routing;
+            e.setDrainRegions(routing.collectors.map((collector) => collector.region));
             setMarkers({ coreY: e.storm.core.y / e.simulation.H * 100,
-                drainY: collector.region.y / e.simulation.H * 100, front: e.storm.front.name });
+                drainY: routing.collectors[0].region.y / e.simulation.H * 100, front: e.storm.front.name });
             const frame = (now: number) => {
                 const fixed = drainFixedSteps(accumulator, Math.min(now - last, 250), SIM_STEP_SEC, 5);
                 accumulator = fixed.accumulatorSec;
                 last = now;
-                for (let step = 0; step < fixed.steps; step++) {
+                for (let step = 0; step < fixed.steps && !endingRef.current; step++) {
                     const dt = SIM_STEP_SEC;
                     const s = stateRef.current;
                     const surge = surgeRef.current;
                     s.elapsed += dt;
+                    const shield = coolantHeadroom(e.storm);
+                    surge.setCoolingCapacity(shield);
                     tickAutoStriker(autoStrikerRef.current, dt, () => {
                         engine!.pulseAutoStriker();
                         // aim + heat are game-code decisions: an area-uniform strike-zone
@@ -431,15 +438,16 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                             autoStrikerSurgeHeat(autoStrikerRef.current)
                         );
                     });
+                    if (endingRef.current) break;
                     // the front's reward knob applies at the mint (design §4.5): the bog's
                     // payoutMult scales essence as gold converts, mirroring the riskMult the
                     // event scheduler already consumes. post-sim, so the in-world value
                     // ledger stays conserved.
-                    const drained = applyPayoutModifier(e.storm.front, collector.collect(e.simulation));
-                    creditEssence(s, drained);
-                    // pulse the drain grate the frame it converts gold, so essence income
-                    // visibly originates FROM the drain rather than appearing on the HUD.
-                    if (drained > 0) engine!.pulseDrain();
+                    for (const [index, collector] of routing.collectors.entries()) {
+                        const drained = applyPayoutModifier(e.storm.front, collector.collect(e.simulation));
+                        creditEssence(s, drained);
+                        if (drained > 0) engine!.pulseDrain(index);
+                    }
                     // heat drains only pre-surge; during a surge the machine ignores it.
                     surge.decayHeat(HEAT_DECAY_PER_SEC * dt);
                     // drive the surge core-heat model (design §3, hkm.2): the ambient ramp
@@ -460,6 +468,9 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                     // pitch rises with the physical danger and 0 silences it between surges.
                     audioRef.current.surgeDrone(surge.active ? surge.coreLoad : 0);
                     const events = stormEventsRef.current?.tick(s.elapsed) ?? [];
+                    if (events.length > 0) lastEventRef.current = {
+                        name: events.at(-1)!.type.replaceAll("-", " "), until: s.elapsed + 6,
+                    };
                     // a lightning front cracks audibly whether or not a rod is installed;
                     // rod strikes below fire their own cracks and the engine throttle
                     // collapses the overlap into at most two per window.
@@ -507,6 +518,12 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                         setHud(snapshot(s, autoStrikerRef.current));
                         setGoal(stormGoal(s, autoStrikerRef.current.level, bestBankRef.current));
                         setProjection(coreProjection(s));
+                        setRoutingHud({ count: routing.collectors.length, fee: routing.collectors[0].fee,
+                            cost: efficiencyCost(routing), shield, worldGold: e.simulation.totalValue() });
+                        const nextEvent = stormEventsRef.current?.forecast;
+                        if (nextEvent) setForecast({ type: nextEvent.type.replaceAll("-", " "),
+                            seconds: Math.max(0, Math.ceil(nextEvent.at - s.elapsed)),
+                            last: s.elapsed < lastEventRef.current.until ? lastEventRef.current.name : "" });
                     }
                 }
                 raf = requestAnimationFrame(frame);
@@ -542,7 +559,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
         const rect = hostRef.current?.getBoundingClientRect();
         if (!brushId || !engine || !rect || rect.width === 0 || rect.height === 0) return;
         const brush = BRUSHES.find((b) => b.id === brushId);
-        if (!brush) return;
+        if (!brush || !brushUnlocked(brush.id, stateRef.current.bankedEssence, effects.criticalTempBonus)) return;
         const costPerCell = brushCostWith(effects, brush);
         const sim = engine.simulation;
         const gx = Math.floor(((clientX - rect.left) / rect.width) * sim.W);
@@ -560,6 +577,13 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
         const sim = engine.simulation;
         const gx = Math.floor(((clientX - rect.left) / rect.width) * sim.W);
         const gy = Math.floor(((clientY - rect.top) / rect.height) * sim.H);
+        if (structureId === "collector" && routingRef.current &&
+            placeCollector(engine.storm, stateRef.current, routingRef.current, gx)) {
+            engine.setDrainRegions(routingRef.current.collectors.map((collector) => collector.region));
+            audioRef.current.buy();
+            setSelectedStructure(null);
+            setHud(snapshot(stateRef.current, autoStrikerRef.current));
+        }
         if (structureId === "magnet" && placeMagnet(sim, stateRef.current, gx, gy)) {
             audioRef.current.buy();
             setHud(snapshot(stateRef.current, autoStrikerRef.current));
@@ -613,6 +637,10 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     };
 
     const onStagePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+        if (selectedBrush || selectedStructure) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setToolCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        }
         if (!selectedBrush || !paintingRef.current) return;
         paintAt(e.clientX, e.clientY);
     };
@@ -668,7 +696,10 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
      * world down when the stage unmounts.
      */
     const endStormNow = (reason: StormEndReason): void => {
-        const final = lifecycleRef.current.summarize(stateRef.current, reason);
+        if (endingRef.current) return;
+        endingRef.current = true;
+        const goldLeftBehind = engineRef.current?.abandonGold() ?? 0;
+        const final = { ...lifecycleRef.current.summarize(stateRef.current, reason), goldLeftBehind };
         setSummary((cur) => cur ?? final);
     };
 
@@ -700,6 +731,10 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     // keep the handlers stable across renders.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
+            if (e.code === "Escape") {
+                setSelectedBrush(null); setSelectedStructure(null); paintingRef.current = false;
+                return;
+            }
             if (e.code === "F9") {
                 e.preventDefault();
                 endStormNow("blow-up");
@@ -709,8 +744,10 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
             e.preventDefault();
             bankSurge();
         };
+        const release = () => { paintingRef.current = false; };
+        window.addEventListener("pointerup", release);
         window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
+        return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("pointerup", release); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -762,6 +799,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     // a brush is "buyable" while at least one cell of it is affordable — the same
     // essence gate paintBrush enforces per cell (design §4.2).
     const affordBrush = (b: BrushDef): boolean =>
+        brushUnlocked(b.id, stateRef.current.bankedEssence, effects.criticalTempBonus) &&
         canPaint(stateRef.current, brushCostWith(effects, b));
 
     // storm over: the results screen replaces the whole cabinet until NEXT STORM
@@ -793,6 +831,16 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                     <strong>{surging ? "ONE MORE COULD CHANGE EVERYTHING" : goal.title}</strong>
                     <p>{surging ? "Gold waits in the core. Space releases it. The next crit heats it." : goal.detail}</p>
                 </div>
+                <div className="event-callout">{forecast.last ? `NOW: ${forecast.last}` : `${forecast.type} in ${forecast.seconds}s`}</div>
+                {toolCursor && (selectedBrush || selectedStructure) && <span className="tool-cursor"
+                    style={{ left: toolCursor.x, top: toolCursor.y }}>{selectedBrush ?? selectedStructure}</span>}
+                <div className="tool-dock" onPointerDown={(event) => event.stopPropagation()}>
+                    <button onClick={() => { setSelectedBrush(null); setSelectedStructure(null); }}
+                        aria-pressed={!selectedBrush && !selectedStructure}>STRIKE <em>esc</em></button>
+                    <span>{selectedBrush ? `paint ${selectedBrush} · paid per cell` : selectedStructure ?
+                        selectedStructure === "collector" ? "choose a separate surface route" : `place ${selectedStructure} in clear air` :
+                        "aim your wealth · protect the route"}</span>
+                </div>
                 <span className="world-label core-label" style={{ top: `${markers.coreY + 7}%` }}>storm core</span>
                 <span className="world-label drain-label" style={{ top: `${markers.drainY - 5}%` }}>↓ collector · gold → essence</span>
             </div>
@@ -816,6 +864,10 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                     <strong>{goal.title}</strong>
                     <div className="goal-track"><span style={{ width: `${goal.progress * 100}%` }} /></div>
                     <span>bank out now: {formatNumber(projection.cores)} cores · collected wealth only</span>
+                </div>
+                <div className="routing-status">
+                    <span>{formatNumber(routingHud.worldGold)} gold exposed · {routingHud.count} drain{routingHud.count === 1 ? "" : "s"}</span>
+                    <span>coolant headroom +{routingHud.shield} · fee {(routingHud.fee * 100).toFixed(0)}%</span>
                 </div>
                 <div className="dps">
                     <span className="stat-val">{formatNumber(hud.dps)}</span>
@@ -986,6 +1038,19 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                     ))}
                 </div>
                 <div className="brushes">
+                    <div className="brushes-label">routing efficiency</div>
+                    <button disabled={routingHud.fee < 0.00001 || hud.essence < routingHud.cost}
+                        onClick={() => {
+                            if (routingRef.current && buyEfficiency(stateRef.current, routingRef.current)) {
+                                audioRef.current.buy(); setHud(snapshot(stateRef.current, autoStrikerRef.current));
+                            }
+                        }}>
+                        <span className="upgrade-name">Polish Collectors</span>
+                        <span className="upgrade-desc">all drains skim 3% less · new drains inherit it</span>
+                        <span className="upgrade-cost">{routingHud.fee < 0.00001 ? "max" : formatNumber(routingHud.cost)}</span>
+                    </button>
+                </div>
+                <div className="brushes">
                     <div className="brushes-label">defense brushes</div>
                     {BRUSHES.map((b) => (
                         <button
@@ -995,7 +1060,8 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                             onClick={() => toggleBrush(b.id)}
                         >
                             <span className="upgrade-name">{b.name}</span>
-                            <span className="upgrade-desc">{b.desc}</span>
+                            <span className="upgrade-desc">{brushUnlocked(b.id, stateRef.current.bankedEssence, effects.criticalTempBonus)
+                                ? b.desc : `unlock at ${b.id === "ice" ? "500" : "5,000"} collected essence · or Aegis`}</span>
                             <span className="upgrade-cost">
                                 {formatNumber(brushCostWith(effects, b))}/cell
                             </span>

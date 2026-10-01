@@ -28,8 +28,8 @@ function brushWithRadius(base: BrushDef, radius: number): BrushDef {
 }
 
 describe("brush catalogue", () => {
-    it("ships stone and water only for the v0.1 slice", () => {
-        expect(BRUSHES.map((b) => b.id)).toEqual(["stone", "water"]);
+    it("ships the starter and earned advanced defense brushes", () => {
+        expect(BRUSHES.map((b) => b.id)).toEqual(["stone", "water", "ice", "wall"]);
     });
 
     it("maps each brush to its sim material", () => {
