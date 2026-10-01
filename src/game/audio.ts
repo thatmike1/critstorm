@@ -225,7 +225,7 @@ export class AudioEngine {
 
     /** browsers require a user gesture before audio; call this from any input handler */
     unlock(): void {
-        this.ensure();
+        if (!this.muted) this.ensure();
     }
 
     private ensure(): AudioContext {
@@ -309,6 +309,19 @@ export class AudioEngine {
         }
         // a bright topping shimmer crowns a fat-pot bank.
         if (heft > 0.5) this.blip(2093, 0.3, "triangle", 0.09, 0.05 + count * 0.06);
+    }
+
+    /** bank-out receipt: a resolved ascending chord, distinct from the risky pot release. */
+    bankOut(): void {
+        [523, 659, 784, 1047].forEach((note, i) => this.blip(note, 0.32, "triangle", 0.06, i * 0.1));
+        this.blip(262, 0.8, "sine", 0.06, 0.4);
+    }
+
+    /** release the storm's voices and browser audio context on teardown. */
+    dispose(): void {
+        this.stopDrone();
+        const context = this.ctx; this.ctx = null; this.noise = null;
+        if (context) void context.close().catch(() => {});
     }
 
     // ---- sim-event layer (sh8.2) -------------------------------------------

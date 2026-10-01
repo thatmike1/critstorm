@@ -75,7 +75,7 @@ export function ResultsScreen({ summary, onNextStorm }: ResultsScreenProps) {
                 </div>
                 {won && <div className="credits"><strong>THE FINAL BANK: {formatNumber(summary.finalBank ?? 0)}</strong>
                     <p>CRITSTORM · a game about knowing when to stop.</p>
-                    <p>Mike & the CRITSTORM crew<br />React · PixiJS · falling sand · a little greed</p>
+                    <p>Thanks, Mike, for wanting more.<br />Built with React & PixiJS · fonts from Google Fonts</p>
                     <span>Thanks for riding the storm.</span>
                 </div>}
                 <button className="next-storm-btn" onClick={onNextStorm}>

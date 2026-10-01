@@ -290,3 +290,21 @@ describe("SimLayer audio lifetime", () => {
         expect(() => layer.destroy()).not.toThrow();
     });
 });
+
+describe("presentation impact hold", () => {
+    it("keeps valued matter moving while holding pixels, then presents the current world", () => {
+        const sim = new Simulation(16, 12, () => 0.5);
+        sim.paint(6, 3, 0, Mat.GOLD); sim.addValue(6, 3, 100);
+        const layer = new SimLayer(sim);
+        try {
+            const before = [...sim.buf32];
+            layer.update(100, false);
+            expect(sim.getValue(6, 3)).toBe(0);
+            expect(sim.totalValue()).toBe(100);
+            expect([...sim.buf32]).toEqual(before);
+            layer.update(0, true);
+            expect([...sim.buf32]).not.toEqual(before);
+            expect(sim.totalValue()).toBe(100);
+        } finally { layer.destroy(); }
+    });
+});

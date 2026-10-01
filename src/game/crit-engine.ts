@@ -79,7 +79,11 @@ interface Eruption {
     tier: number;
 }
 
-const POOL_SIZE = 600;
+interface Spark { x: number; y: number; vx: number; vy: number; life: number; duration: number; color: number; size: number }
+const POOL_SIZE = 200;
+const MAX_SPARKS = 180;
+const TIER_NAMES = ["", "CRIT", "DOUBLE", "TRIPLE", "WILD", "INFERNO", "NEON", "SUPERNOVA", "JACKPOT"];
+
 
 /** visual tier for the BANK mega-eruption (design §3): drives only the projectile
  * spread, colour, and shake of the spectacle. the deposited material is always
@@ -131,6 +135,10 @@ export class CritEngine {
     private bonuses: FallingBonus[] = [];
     private eruptions: Eruption[] = [];
     private bankRng: () => number;
+    private sparks: Spark[] = [];
+    private sparkLayer = new Graphics();
+    private reducedMotion = false;
+    private impactHoldMs = 0;
     private shakeTime = 0;
     private shakeStrength = 0;
 
@@ -140,8 +148,7 @@ export class CritEngine {
 
         // BOTTOM LAYER: the bootstrapped storm world (terrain floor + storm core),
         // added first so every crit number, effect, and flash draws on top of it
-        // (design §7). It lives on app.stage (not this.stage) so screen shake never
-        // jitters the world underneath. the core + strike zone are held on `world`
+        // (design §7). It lives on app.stage (not this.stage) so the camera moves it together with the overlays. the core + strike zone are held on `world`
         // for the eruption spawner (wave 3).
         this.world = createWorld({ seed });
         this.simLayer = new SimLayer(this.world.sim);
@@ -152,7 +159,7 @@ export class CritEngine {
         // sim but under the eruptions, so gold landing on the drain has a visible sink
         // instead of vanishing (which playtests read as a bug). added right after the
         // sim sprite so it layers above the world yet below every arc, number, and
-        // flash. on app.stage so screen shake never jitters it off the drain rect.
+        // flash. on app.stage so the camera moves it together with the drain.
         this.drainMarker = new DrainMarker();
         app.stage.addChild(this.drainMarker.gfx);
 
@@ -168,14 +175,14 @@ export class CritEngine {
 
         // the surge pot made physical (design §3 / pillar 1): a glow anchored on the
         // storm core that swells + brightens with the pot instead of the pot being a
-        // bare number. it rides just under the crit numbers, on app.stage so screen
-        // shake never jitters it off the core. hidden until a surge is live.
+        // bare number. it rides just under the crit numbers, on app.stage so it stays aligned with the moving camera. hidden until a surge is live.
         this.coreGlow = new Graphics();
         this.coreGlow.visible = false;
         app.stage.addChild(this.coreGlow);
 
         this.stage = new Container();
         app.stage.addChild(this.stage);
+        app.stage.addChild(this.sparkLayer);
         this.flash = new Graphics();
         this.flash.visible = false;
         app.stage.addChild(this.flash);
@@ -264,9 +271,9 @@ export class CritEngine {
     spawn(damage: number, tier: number, golden = false): void {
         const w = this.app.screen.width;
         const h = this.app.screen.height;
-        const fontSize =
-            13 + tier * 9 + Math.min(Math.log10(damage + 1) * 2, 24) + (golden ? 10 : 0);
         const label = golden ? `✦ ${formatNumber(damage)} ✦` : formatNumber(damage);
+        const fontSize = Math.min(13 + tier * 9 + Math.min(Math.log10(damage + 1) * 2, 24) + (golden ? 10 : 0),
+            w / ((label.length + 1) * 1.65));
         const fill = golden ? GOLDEN_COLOR : TIER_COLORS[Math.min(tier, TIER_COLORS.length - 1)];
         const strokeWidth = golden ? 4 : tier >= 2 ? Math.min(tier, 4) : 0;
         const x = w * 0.1 + this.rng() * w * 0.8;
@@ -285,6 +292,14 @@ export class CritEngine {
             spin: golden ? (this.rng() - 0.5) * 0.8 : 0,
             rotation: (this.rng() - 0.5) * 0.15 * tier,
         });
+        if (tier >= 2) {
+            this.sparkBurst(w * this.world.core.x / this.world.sim.W, h * this.world.core.y / this.world.sim.H,
+                4 + tier * 3, Number.parseInt(fill.slice(1), 16));
+            this.spawnText(TIER_NAMES[tier] ?? "JACKPOT", { x: w * 0.5, y: h * this.world.core.y / this.world.sim.H - 35,
+                fontSize: Math.min(14 + tier * 2, w / 12), fill, strokeWidth: 2, tier: 0,
+                baseScale: 1, vx: 0, vy: -15, maxLife: 650 + tier * 70, spin: 0, rotation: 0 });
+        }
+        if (tier >= 6 && !this.reducedMotion) this.impactHoldMs = 70;
         if (tier >= 4) this.shake(Math.min(2 + (tier - 4) * 3, 14));
         if (tier >= 6 || golden)
             this.flashScreen(golden ? 0xffe066 : 0xff2e5e, golden ? 0.12 : 0.2);
@@ -336,6 +351,7 @@ export class CritEngine {
 
         const gfx = new Graphics();
         const color = TIER_COLORS[Math.min(tier, TIER_COLORS.length - 1)];
+        gfx.rect(-3, -3, 6, 24 + tier * 3).fill({ color: 0xffa32b, alpha: 0.3 });
         gfx.circle(0, 0, 3 + Math.min(tier, 6)).fill(color);
         gfx.position.set(sx, sy);
         // a queued burst stays hidden at the core until its delay elapses.
@@ -391,6 +407,11 @@ export class CritEngine {
         const heft = Math.min(1, Math.log10(1 + payout) / 6);
         this.flashScreen(0xffd75e, 0.35 + heft * 0.35);
         this.shake(16 + heft * 12);
+        if (!this.reducedMotion) this.impactHoldMs = 80;
+        this.sparkBurst(this.app.screen.width * 0.5, this.app.screen.height * this.world.core.y / this.world.sim.H, 90, 0xffd75e);
+        this.spawnText("BANKED", { x: this.app.screen.width * 0.5, y: this.app.screen.height * this.world.core.y / this.world.sim.H + 100,
+            fontSize: 32, fill: GOLDEN_COLOR, strokeWidth: 3, tier: 0, baseScale: 1,
+            vx: 0, vy: -18, maxLife: 1000, spin: 0, rotation: 0 });
     }
 
     /** erupt the winning pot once as a conserved, screen-wide golden storm. */
@@ -515,7 +536,12 @@ export class CritEngine {
         bustPot(this.world.sim, this.world.core.x, this.world.core.y, pot);
         this.renderSurge(null); // the pot is gone — kill the swelling core glow
         this.flashScreen(0xff3311, 0.4);
-        this.shake(16);
+        this.shake(22);
+        if (!this.reducedMotion) this.impactHoldMs = 90;
+        this.sparkBurst(this.app.screen.width * 0.5, this.app.screen.height * this.world.core.y / this.world.sim.H, 120, 0xff4024);
+        this.spawnText("RUPTURE", { x: this.app.screen.width * 0.5, y: this.app.screen.height * 0.28,
+            fontSize: 34, fill: "#ff4024", strokeWidth: 3, tier: 0, baseScale: 1,
+            vx: 0, vy: -12, maxLife: 1300, spin: 0, rotation: 0 });
     }
 
     /**
@@ -629,7 +655,43 @@ export class CritEngine {
         });
     }
 
+    /** change presentation intensity without affecting physics, timing, or payout streams. */
+    setReducedMotion(reduced: boolean): void {
+        this.reducedMotion = reduced;
+        if (reduced) { this.shakeTime = 0; this.impactHoldMs = 0; this.app.stage.position.set(0, 0); this.flashAlpha = 0; this.flash.visible = false; }
+    }
+
+    /** celebrate collected wealth at departure; the sparks carry no economic value. */
+    bankOut(): void {
+        this.sparkBurst(this.app.screen.width * 0.5, this.app.screen.height * 0.65, 110, 0xffe066);
+        this.flashScreen(0xffd75e, 0.14);
+    }
+
+    /** emit a bounded burst of cosmetic sparks on an isolated seeded stream. */
+    private sparkBurst(x: number, y: number, count: number, color: number): void {
+        if (this.reducedMotion) count = Math.min(count, 8);
+        for (let i = 0; i < count; i++) {
+            const angle = this.rng() * Math.PI * 2, speed = 45 + this.rng() * 200;
+            this.sparks.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 45,
+                life: 0, duration: 0.3 + this.rng() * 0.6, color, size: 2 + Math.floor(this.rng() * 3) });
+        }
+        if (this.sparks.length > MAX_SPARKS) this.sparks.splice(0, this.sparks.length - MAX_SPARKS);
+    }
+
+    /** draw all sparks in one graphics batch and expire them by elapsed time. */
+    private updateSparks(dt: number): void {
+        this.sparkLayer.clear();
+        for (let i = this.sparks.length - 1; i >= 0; i--) {
+            const spark = this.sparks[i]; spark.life += dt;
+            if (spark.life >= spark.duration) { this.sparks.splice(i, 1); continue; }
+            spark.x += spark.vx * dt; spark.y += spark.vy * dt; spark.vy += 220 * dt;
+            this.sparkLayer.rect(Math.round(spark.x), Math.round(spark.y), spark.size, spark.size)
+                .fill({ color: spark.color, alpha: 1 - spark.life / spark.duration });
+        }
+    }
+
     private flashScreen(color: number, alpha: number): void {
+        if (this.reducedMotion) return;
         this.flash.clear();
         this.flash.rect(0, 0, this.app.screen.width, this.app.screen.height).fill(color);
         this.flashAlpha = Math.max(this.flashAlpha, alpha);
@@ -638,6 +700,7 @@ export class CritEngine {
     }
 
     private shake(strength: number): void {
+        if (this.reducedMotion) return;
         this.shakeTime = 250;
         this.shakeStrength = Math.max(this.shakeStrength, strength);
     }
@@ -682,7 +745,12 @@ export class CritEngine {
         // advance + re-upload the sim before the overlay so the world sits behind
         // this frame's crit numbers; the fixed-timestep accumulator inside decouples
         // sim speed from display refresh. keep it stretched to the (resized) stage.
-        this.simLayer.update(dtMs);
+        const holding = this.impactHoldMs > 0 && !this.reducedMotion;
+        this.impactHoldMs = Math.max(0, this.impactHoldMs - dtMs);
+        this.simLayer.update(dtMs, !holding);
+        const visualMs = holding ? 0 : dtMs;
+        const visualDt = visualMs / 1000;
+        this.updateSparks(visualDt);
         this.simLayer.resize(this.app.screen.width, this.app.screen.height);
         // breathe + redraw the drain grate over the (resized) stage; the pulse decays
         // here so a collection flare fades even on frames the sim advanced no steps.
@@ -700,12 +768,12 @@ export class CritEngine {
         }
         for (let i = this.active.length - 1; i >= 0; i--) {
             const c = this.active[i];
-            c.life += dtMs;
+            c.life += visualMs;
             const p = c.life / c.maxLife;
-            c.text.x += c.vx * dt;
-            c.text.y += c.vy * dt;
-            c.vy += 25 * dt;
-            c.text.rotation += c.spin * dt;
+            c.text.x += c.vx * visualDt;
+            c.text.y += c.vy * visualDt;
+            c.vy += 25 * visualDt;
+            c.text.rotation += c.spin * visualDt;
             // pop-in overshoot for real crits, then settle
             if (c.baseScale < 1) {
                 const pop = Math.min(c.life / 120, 1);
@@ -737,10 +805,10 @@ export class CritEngine {
         if (this.shakeTime > 0) {
             this.shakeTime -= dtMs;
             const s = this.shakeStrength * (this.shakeTime / 250);
-            this.stage.position.set((this.rng() - 0.5) * s, (this.rng() - 0.5) * s);
+            this.app.stage.position.set((this.rng() - 0.5) * s, (this.rng() - 0.5) * s);
             if (this.shakeTime <= 0) {
                 this.shakeStrength = 0;
-                this.stage.position.set(0, 0);
+                this.app.stage.position.set(0, 0);
             }
         }
     }

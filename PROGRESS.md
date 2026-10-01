@@ -8,7 +8,7 @@ Branch: `feat/finish`. Main must never be pushed. User workflow is sequential un
 1. **A reason for the next click — complete.** (`critstorm-hio.2`) Visible resting core and collector labels; first-run instructions; successive storm goals and core-yield preview; useful workshop/front previews; seed production streams and use fixed game steps. Verify fresh pacing and an unassisted opening through its first bank.
 2. **Build your own gold machine — complete.** Ice/Wall unlocks, additional collectors and fee upgrades; real Vault drains and Front event modifiers; tool feedback and event forecast. Account for blocked payouts. Measure collection and hazard exposure with the harness; inspect painted tools and installed routing in Chromium.
 3. **Chase the Eye and finish the game — complete.** Third arena with lava/lightning, honest v1 workshop ladder, visible final bank requirement, conserved golden finale, terminal stats/credits and replay. Measure feasible finale banks and Eye performance; browser-check ordinary, failed and winning exits.
-4. **Make greed feel enormous — planned.** Camera impact, presentation hit-stop, crit tier typography, bounded sparks/trails, synthesized bank-out/rupture feedback, delayed blow-up so the disaster stays visible, motion/audio control. Capture bank, bust, results and narrow-screen layouts.
+4. **Make greed feel enormous — complete.** Camera impact, presentation hit-stop, crit tier typography, bounded sparks/trails, synthesized bank-out/rupture feedback, delayed blow-up so the disaster stays visible, motion/audio control. Capture bank, bust, results and narrow-screen layouts.
 5. **Own flair: a storm worth remembering — planned (last unit).** Add one or two original ideas that deepen voluntary risk and personal storm history; state the rationale here. Measure rewards/costs if balance changes; verify persistence and complete a final end-to-end run. Write the final summary at the top, gate, commit, push and clean up browser/server/scratch artifacts.
 
 ## Unit 0 evidence
@@ -23,7 +23,7 @@ Branch: `feat/finish`. Main must never be pushed. User workflow is sequential un
 
 ## Next action
 
-Units 0–2 are complete. Next is unit 4 (`critstorm-hio.5`): impact, sound, exits and narrow-screen play. Own flair .6 follows.
+Units 0–2 are complete. Next is the last unit (`critstorm-hio.6`): the Greed Bell and remembered storms, then final end-to-end verification and cleanup.
 
 ## Unit 1 — a reason for the next click
 
@@ -56,3 +56,14 @@ Units 0–2 are complete. Next is unit 4 (`critstorm-hio.5`): impact, sound, exi
 - `npm run sim -- --mode finale`: base/multi level 80 + one real rod-sized tier-eight strike banks **179.31B**, clears the final target without Forge bonuses, and survives the 1,000-degree Aegis ceiling. Eye + finale, 400 steps: **1,758ms total / 4.40ms mean** on this box. Unguarded shower burns in lava, with source 10B versus accounted **9,999,999,744** (relative Float32 rounding 0.00000256%).
 - Chromium: inspected Eye, golden shower and credits; actual rod-triggered bank **239B**, **13.90B** collected during ending, **7.91K** cores; clean console. Verified workshop return/re-entry and blow-up. The initial check banked an ineligible pot ordinarily, correctly leaving the storm active; adjusted QA timing to wait for the first scheduled bolt, then checked the winning path.
 - Gate: **497 tests / 36 files** passed, type-check and production build passed (12.22s; 574.25 kB / 181.13 kB gzip).
+
+## Unit 4 — make greed feel enormous
+
+- Camera shake now moves the simulated world, grates, machine, arcs and type together. Added tier names, bounded seeded square sparks (180 maximum), gold arc tails, smaller capped number pool, legible large numbers, and a BANKED caption placed clear of the instructions.
+- High-tier/bank/rupture impact holds the pixel presentation for 70–90ms; physics, heat, payout landing and game timers keep running. A new regression moves valued matter during a held image and verifies the current world is presented on release, with value unchanged.
+- Bank-out plays a resolved synth chord and a 1.2s core receipt. Rupture gets 1.6s of visible fire, shards and red type before results. Ordinary endings stop collection at the decision; the golden finale retains its physical collection window. Audio contexts and continuous drones are released with each storm.
+- Sound and calm-motion choices persist independently of the old workshop profile. Calm mode disables shake, flashes, hit-stop and CSS animations and reduces particles; the system reduced-motion preference is the default. No sound assets/dependencies added.
+- Added phone layouts for the world, workshop ladders, fronts and results. At **390×844**, no horizontal overflow; the bank button occupies y=481→521 in the visible world and shows surge heat when riding. Chromium checked bank, bank-out receipt, rupture, mobile workshop/world, and mute/calm choices across storm changes; clean console. Inspected the corrected bank caption after its first capture touched the guidance.
+- This unit changes presentation rather than balance. Its physical-impact-hold regression and the existing seeded economic distributions check that visual pauses do not grant safety or alter payouts.
+- Initial full gate had one **5s timeout** in a 3,000-trial surge computation while Chromium shared the CPU; other 497 tests passed. Stopped the browser/server and reran with one worker and a 60s computational timeout, retaining every balance assertion.
+- Final gate: **498 tests / 36 files** passed (76.42s), type-check and production build passed (579.07 kB / 182.54 kB gzip).

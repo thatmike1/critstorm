@@ -25,7 +25,7 @@ import { bustTriggersBlowUp, StormLifecycle, type StormSummary } from "./game/st
 import { ResultsScreen } from "./results-screen";
 import { formatNumber } from "./game/format";
 import { createRouting, placeCollector, buyEfficiency, efficiencyCost, coolantHeadroom, type RoutingState } from "./game/routing";
-import { HEAT_DECAY_PER_SEC, Surge } from "./game/surge";
+import { HEAT_DECAY_PER_SEC, Surge, potState } from "./game/surge";
 import { coreHeadroom } from "./game/surge-gauge";
 import { BRUSHES, paintBrush, canPaint, brushUnlocked, type BrushId, type BrushDef } from "./game/brush";
 import { lightningRodStrikeCount, StormEvents, createStormEventRng } from "./game/storm-events";
@@ -88,6 +88,7 @@ import {
 import { loadWorkshopProfile, saveWorkshopProfile } from "./game/workshop-storage";
 import { ProfileStore } from "./game/persistence";
 import { FINALE_DURATION_SEC, FINAL_POT_THRESHOLD, qualifiesForFinale } from "./game/finale";
+import { loadPreferences, savePreferences } from "./game/preferences";
 import { coreProjection, stormGoal } from "./game/storm-goals";
 import { drainFixedSteps, SIM_STEP_SEC } from "./game/sim-layer";
 import { WorkshopView } from "./workshop-view";
@@ -193,6 +194,9 @@ interface StormViewProps {
 function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     const [initialState] = useState(() => createInitialState(effects));
     const hostRef = useRef<HTMLDivElement>(null);
+    const [preferences, setPreferences] = useState(loadPreferences);
+    const preferencesRef = useRef(preferences);
+    preferencesRef.current = preferences;
     const rollRng = useRef(createStormEventRng(seed ^ 0xc017));
     const aimRng = useRef(createStormEventRng(seed ^ 0xa17));
     const spikeRng = useRef(createStormEventRng(seed ^ 0x5a1ce));
@@ -264,7 +268,13 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     const [hud, setHud] = useState<HudState>(() =>
         snapshot(stateRef.current, autoStrikerRef.current)
     );
-    const [muted, setMuted] = useState(false);
+    const muted = preferences.muted;
+    useEffect(() => {
+        audioRef.current.muted = preferences.muted;
+        engineRef.current?.setReducedMotion(preferences.reducedMotion);
+        document.documentElement.dataset.motion = preferences.reducedMotion ? "reduced" : "full";
+        savePreferences(preferences);
+    }, [preferences]);
     const [cps, setCps] = useState(0);
     const [heat, setHeat] = useState(0);
     const [surgeHud, setSurgeHud] = useState({
@@ -390,6 +400,8 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
             }
             engine = e;
             engineRef.current = e;
+            e.setReducedMotion(preferencesRef.current.reducedMotion);
+            audioRef.current.muted = preferencesRef.current.muted;
             // subscribe this storm's stat tracker to the sim's gold-loss ledger so
             // the results screen can report gold lost to hazards (npq.2).
             lifecycleRef.current.attach(e.simulation);
@@ -431,7 +443,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                     const outroState = outroRef.current;
                     if (outroState) {
                         s.elapsed += dt;
-                        for (const collector of routing.collectors) creditEssence(s, applyPayoutModifier(e.storm.front, collector.collect(e.simulation)));
+                        if (outroState.reason === "victory") for (const collector of routing.collectors) creditEssence(s, applyPayoutModifier(e.storm.front, collector.collect(e.simulation)));
                         outroState.remaining -= dt;
                         if (outroState.remaining <= 0) finalizeStorm(outroState.reason);
                         continue;
@@ -551,7 +563,7 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
             cancelAnimationFrame(raf);
             // the drone is the one continuous voice — kill it with the storm so it
             // can never play over the results screen or the next mount.
-            audioRef.current.surgeDrone(0);
+            audioRef.current.dispose();
             lifecycleRef.current.detach();
             stormEventsRef.current = null;
             engine?.destroy();
@@ -717,11 +729,10 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     const endStormNow = (reason: StormEndReason): void => {
         if (endingRef.current) return;
         endingRef.current = true;
-        if (reason === "victory") {
-            outroRef.current = { reason, remaining: FINALE_DURATION_SEC };
-            setOutro(reason);
-            audioRef.current.surgeDrone(0);
-        } else finalizeStorm(reason);
+        outroRef.current = { reason, remaining: reason === "victory" ? FINALE_DURATION_SEC : reason === "bank-out" ? 1.2 : 1.6 };
+        setOutro(reason);
+        audioRef.current.surgeDrone(0);
+        if (reason === "bank-out") { engineRef.current?.bankOut(); audioRef.current.bankOut(); }
     };
 
     /** settle physical payouts and close the loss ledger after the ending spectacle. */
@@ -767,6 +778,9 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
             }
             if (e.code === "F9") {
                 e.preventDefault();
+                if (endingRef.current) return;
+                if (surgeRef.current.active) surgeRef.current.endSurge("bust");
+                else { engineRef.current?.bust(potState(0, 0)); audioRef.current.bust(); }
                 endStormNow("blow-up");
                 return;
             }
@@ -802,9 +816,10 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
     };
 
     const toggleMute = () => {
+        const next = { ...preferences, muted: !preferences.muted };
+        audioRef.current.muted = next.muted;
         audioRef.current.unlock();
-        audioRef.current.muted = !audioRef.current.muted;
-        setMuted(audioRef.current.muted);
+        setPreferences(next);
     };
 
     /** pick a defense brush, or deselect it (back to attack mode) if re-clicked. */
@@ -857,6 +872,14 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                 onPointerUp={stopPainting}
                 onPointerLeave={stopPainting}
             >
+                {outro && outro !== "victory" && <div className={`exit-banner ${outro}`}>
+                    <strong>{outro === "bank-out" ? "FORTUNE SECURED" : "THE CORE RUPTURED"}</strong>
+                    <span>{outro === "bank-out" ? `${formatNumber(projection.cores)} cores · the house pays ×1.5` : "the gold you collected is still yours"}</span>
+                </div>}
+                <div className="mobile-bank" onPointerDown={(event) => event.stopPropagation()}>
+                    <button onClick={surging ? bankSurge : bankOutStorm}>{surging ? `BANK ${formatNumber(surgeHud.potValue)}` : `BANK OUT · ${formatNumber(projection.cores)} cores`}</button>
+                    {surging && <span className={headroom.medianFits ? "" : "hot"}>heat {Math.round(headroom.load * 100)}% · {headroom.medianFits ? `~${headroom.medianCritsLeft} crits left` : "one crit could bust"}</span>}
+                </div>
                 {outro === "victory" && <div className="finale-banner"><strong>CRITSTORM</strong><span>THE SKY IS YOURS.</span><p>{formatNumber(finalBankRef.current)} · the final bank</p></div>}
                 <div className="stage-guide">
                     <span className="front-tag">{markers.front} · storm {Math.floor(stateRef.current.elapsed / 60)} min</span>
@@ -889,6 +912,10 @@ function StormView({ effects, onStormEnd, seed }: StormViewProps) {
                         {muted ? "unmute" : "mute"}
                     </button>
                 </div>
+                <button className="motion-control" aria-pressed={preferences.reducedMotion}
+                    onClick={() => setPreferences({ ...preferences, reducedMotion: !preferences.reducedMotion })}>
+                    {preferences.reducedMotion ? "motion: calm" : "motion: full"}
+                </button>
                 <div className="payout">
                     <span className="payout-value">{formatNumber(hud.essence)}</span>
                     <span className="payout-label">essence</span>

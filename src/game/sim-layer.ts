@@ -119,6 +119,7 @@ export class SimLayer {
     private readonly texture: Texture;
     /** unspent real-time carried between frames, drained in fixed sim steps. */
     private accumulatorSec = 0;
+    private pixelsPending = false;
     /** teardown for the live audio subscription; null when no synth is attached. */
     private audioDetach: (() => void) | null = null;
 
@@ -160,7 +161,7 @@ export class SimLayer {
      * then source.update() flags the GPU upload — skipped entirely on frames that
      * advance no steps, since the buffer is unchanged.
      */
-    update(elapsedMs: number): void {
+    update(elapsedMs: number, present = true): void {
         const { steps, accumulatorSec } = drainFixedSteps(
             this.accumulatorSec,
             elapsedMs,
@@ -168,8 +169,9 @@ export class SimLayer {
             MAX_SIM_STEPS_PER_FRAME
         );
         this.accumulatorSec = accumulatorSec;
-        if (steps === 0) return;
-        this.sim.step(steps);
+        if (steps > 0) { this.sim.step(steps); this.pixelsPending = true; }
+        if (!present || !this.pixelsPending) return;
+        this.pixelsPending = false;
         this.sim.writeImage();
         this.source.update();
     }
