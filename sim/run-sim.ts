@@ -3,13 +3,13 @@
  * under a bot strategy and prints a per-minute progression table plus a storm
  * summary. deterministic for a fixed seed.
  *
- *   npm run sim                          # default storm (bank-at-6, 45 min, seed 42)
- *   npm run sim -- --duration 20 --strategy always-ride --seed 7
- *   npm run sim -- --strategy bank-at-8
- *   npm run sim -- --mode pacing --duration 2 --seed 42
- *   npm run sim -- --mode late-pacing --duration 35 --auto-striker enabled --overclock disabled
- *   npm run sim -- --mode economy        # legacy greedy-economy table
- *   npm run sim 20                       # legacy: economy table, 20 minutes
+ *   pnpm run sim                          # default storm (bank-at-6, 45 min, seed 42)
+ *   pnpm run sim --duration 20 --strategy always-ride --seed 7
+ *   pnpm run sim --strategy bank-at-8
+ *   pnpm run sim --mode pacing --duration 2 --seed 42
+ *   pnpm run sim --mode late-pacing --duration 35 --auto-striker enabled --overclock disabled
+ *   pnpm run sim --mode economy        # legacy greedy-economy table
+ *   pnpm run sim 20                       # legacy: economy table, 20 minutes
  *
  * flags: --duration <minutes> --strategy <never-ride|always-ride|bank-at-n>
  *        --seed <int> --mode <storm|pacing|late-pacing|economy|routing|finale|greed>

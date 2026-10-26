@@ -10,8 +10,8 @@
  * of a frame: step + pixel pack; the GPU texture upload is a fixed memcpy the sim
  * does not own). run it with:
  *
- *   npx tsx sim/perf-bench.ts
- *   npx tsx sim/perf-bench.ts --w 320 --h 180 --frames 600 --warmup 120
+ *   pnpm exec tsx sim/perf-bench.ts
+ *   pnpm exec tsx sim/perf-bench.ts --w 320 --h 180 --frames 600 --warmup 120
  *
  * deterministic scene construction, but the sim itself uses Math.random for its
  * stochastic gates, so absolute numbers vary a little run to run; the ratio

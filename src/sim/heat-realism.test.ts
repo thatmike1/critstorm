@@ -7,7 +7,7 @@ import { Simulation } from "./simulation";
 // These tests encode the DESIRED steady states from the interaction review — not
 // today's behavior. The targets that the current engine does NOT yet meet are
 // written with `it.fails(...)`: vitest asserts the test currently FAILS, so this
-// file stays green on `npm test` while documenting exactly what's broken.
+// file stays green on `pnpm test` while documenting exactly what's broken.
 //
 // The feedback loop: when a fix lands and the behavior becomes correct, that
 // `it.fails` test starts PASSING, which makes vitest report it as failing
