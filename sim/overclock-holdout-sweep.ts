@@ -3,7 +3,7 @@
  * kept out of the committed test suite because it runs thousands of 35-minute
  * storms; the suite commits one holdout cohort instead. emits markdown on stdout.
  *
- *   npx tsx sim/overclock-holdout-sweep.ts [cohorts]
+ *   pnpm exec tsx sim/overclock-holdout-sweep.ts [cohorts]
  */
 import {
     DEFICIT_CLOSURE_FLOOR,

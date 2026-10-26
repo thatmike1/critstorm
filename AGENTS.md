@@ -33,7 +33,7 @@ bd close <id>         # Complete work
 Before the last message of a session:
 
 1. File a bead for anything left over, and close the finished ones.
-2. Run the quality gate if code changed: `npx vitest run` and `npx tsc --noEmit`.
+2. Run the quality gate if code changed: `pnpm exec vitest run` and `pnpm exec tsc --noEmit`.
 3. Mirror issues to GitHub: `GITHUB_TOKEN=$(gh auth token) bd github sync --push-only` (beads is the source of truth; GitHub is a read-only mirror — never close issues on GitHub directly).
 4. Commit, and once the work is finished and verified, push, `main` included: it redeploys the live site to GitHub Pages (`.github/workflows/deploy.yml`), and that needs no asking.
 5. Hand off: what changed, what was verified, what the next session picks up.
@@ -68,18 +68,18 @@ cp -rf source dest          # NOT: cp -r source dest
 ## Build & Test
 
 ```bash
-npm ci                # install (always run this first in a fresh worktree)
-npm test              # vitest run — the test suite
-npm run build         # tsc --noEmit && vite build
-npm run dev           # vite dev server
-npm run sim           # tsx sim/run-sim.ts — headless sim harness
+pnpm install --frozen-lockfile # install (always run this first in a fresh worktree)
+pnpm test              # vitest run — the test suite
+pnpm run build         # tsc --noEmit && vite build
+pnpm run dev           # vite dev server
+pnpm run sim           # tsx sim/run-sim.ts — headless sim harness
 ```
 
 **Quality gate — both must be green before any commit:**
 
 ```bash
-npx vitest run
-npx tsc --noEmit
+pnpm exec vitest run
+pnpm exec tsc --noEmit
 ```
 
 ## Architecture Overview

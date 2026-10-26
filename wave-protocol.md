@@ -30,7 +30,7 @@ Tasks flow through 1–4 independently — no barrier between stages. Phase 5 is
 
 **1. Guard** — read-only with respect to the working tree; it may run `git fetch` to refresh remote refs. Clean tree; main attached and synced to `origin/main`; `gh auth status` ok; quality gate green; the previous wave's dependency present as an exported symbol; record `baseSha`. Any failure aborts the whole wave before implementation spends a token.
 
-**2. Implement** — one worker per issue, isolated worktree, all parallel. `npm ci`, branch from `origin/main`, read the design.md sections named in the spec, build, gate green, commit, push branch, `gh pr create` referencing the beads id.
+**2. Implement** — one worker per issue, isolated worktree, all parallel. `pnpm install --frozen-lockfile`, branch from `origin/main`, read the design.md sections named in the spec, build, gate green, commit, push branch, `gh pr create` referencing the beads id.
 
 **3. Review** — no worktree. Reads the head read-only from the main checkout via `git show origin/<branch>:<path>` and `gh pr diff <n>`. Grades against the task spec, the named design.md sections, value conservation, the identity guardrail, scope discipline, test quality, conventions. Posts one comment-only review with `file:line` findings classed `blocker` / `major` / `minor`.
 

@@ -37,9 +37,9 @@ the receipt save when results settle, so reloading the results cannot lose or aw
 
 For reproducible checks use `?seed=42`; `?front=eye` and `?lv=base,chance,multi,auto,golden` are QA
 shortcuts. Shared `?seed=42&sky=eye` links respect the recipient's front unlocks.
-`npm run sim -- --mode routing` measures paid routes/coolant;
-`npm run sim -- --mode finale` checks the winning bank and Eye physics budget;
-`npm run sim -- --mode greed` compares ordinary banks against the Bell across paired seeds.
+`pnpm run sim --mode routing` measures paid routes/coolant;
+`pnpm run sim --mode finale` checks the winning bank and Eye physics budget;
+`pnpm run sim --mode greed` compares ordinary banks against the Bell across paired seeds.
 
 **Core invariant:** value is conserved. It moves with cells (Lagrangian carry, via swap paths —
 never `setCell`), and every source and sink is accounted for in the ledger.
@@ -47,11 +47,11 @@ never `setCell`), and every source and sink is accounted for in the ledger.
 ## Running it
 
 ```bash
-npm ci
-npm run dev       # vite dev server
-npm run build     # tsc --noEmit && vite build
-npm test          # vitest run, one worker by default
-npm run sim       # headless sim harness — balance/playtest measurement
+pnpm install --frozen-lockfile
+pnpm run dev       # vite dev server
+pnpm run build     # tsc --noEmit && vite build
+pnpm test          # vitest run, one worker by default
+pnpm run sim       # headless sim harness — balance/playtest measurement
 ```
 
 ## Layout
@@ -68,4 +68,4 @@ npm run sim       # headless sim harness — balance/playtest measurement
 
 kebab-case filenames, no `any`, lowercase JSDoc, one-line lowercase commit messages. Anything
 random takes a seeded rng and must be unit-testable; logic is fixed-timestep and dt-scaled, never
-per-frame. `npx vitest run` and `npx tsc --noEmit` are the gate — both green before any commit.
+per-frame. `pnpm exec vitest run` and `pnpm exec tsc --noEmit` are the gate — both green before any commit.
