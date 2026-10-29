@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { setImmediate } from "node:timers/promises";
+import { afterEach, describe, expect, it } from "vitest";
 import { alwaysRide, bankAtN, neverRide } from "./bot-strategy";
 import {
     bustHazardCurve,
@@ -6,6 +7,12 @@ import {
     runSurge,
     type SweepConfig,
 } from "./surge-harness";
+
+// let vitest 3 flush worker messages between synchronous simulation sweeps;
+// the whole file can exceed its RPC timeout on a busy shared machine.
+afterEach(async () => {
+    await setImmediate();
+});
 
 // design.md §3/§6: the surge is a bank-or-ride gamble. riding to n+1 multiplies
 // the pot by 1.5, so riding stops being EV-positive once P(bust on the next
